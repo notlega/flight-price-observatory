@@ -555,7 +555,7 @@ streamlit run dashboard/app.py
 Run automated tests:
 
 ```bash
-pytest
+uv run pytest
 ```
 
 ---
