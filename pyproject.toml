@@ -1,0 +1,13 @@
+[project]
+name = "flight-price-observatory"
+version = "0.1.0"
+description = "Flight Price Observatory is an automated data engineering and analytics platform designed to continuously collect, store, and analyse historical airfare pricing data."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+]

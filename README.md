@@ -519,11 +519,8 @@ Example:
 FLIGHT_PROVIDER_API_KEY=
 
 R2_ACCESS_KEY=
-
 R2_SECRET_KEY=
-
 R2_BUCKET=
-
 R2_ENDPOINT=
 
 R2_REGION=
@@ -558,7 +555,7 @@ streamlit run dashboard/app.py
 Run automated tests:
 
 ```bash
-pytest
+uv run pytest
 ```
 
 ---
