@@ -5,3 +5,8 @@ description = "Flight Price Observatory is an automated data engineering and ana
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.20",
+]
