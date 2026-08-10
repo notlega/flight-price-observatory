@@ -45,7 +45,7 @@ def _build_sources() -> list[tuple[str, str]]:
             (p, f"{js}proxifly/free-proxy-list@main/proxies/protocols/{p}/data.txt")
         )
         sources.append(
-            (p, f"{gh}hw630590/free-proxies/refs/heads/main/proxies/{p}/{p}.txt")
+            (p, f"{gh}jetkai/proxy-list/main/online-proxies/txt/proxies-{p}.txt")
         )
         sources.append(
             (p, f"{gh}Thordata/awesome-free-proxy-list/main/proxies/{p}.txt")
