@@ -1,0 +1,75 @@
+import json
+import os
+
+import pytest
+
+from collector.convert import _jsonl_row, convert
+from collector.repository import SearchRepository
+
+
+@pytest.fixture
+async def seeded_db(tmp_path):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    await repo.upsert(
+        "SIN|KUL", "2026-08-01", "SIN", "KUL", [{"price": 100}], None, 0, True, "t1"
+    )
+    await repo.upsert(
+        "SIN|BKK", "2026-08-01", "SIN", "BKK", [{"price": 90}], None, 0, True, "t2"
+    )
+    await repo.flush()
+    await repo.close()
+    return db
+
+
+async def test_convert_writes_jsonl_and_deletes(seeded_db, tmp_path):
+    out = str(tmp_path / "out.jsonl")
+    path = await convert(seeded_db, out, delete=True)
+    assert path == out
+    assert not os.path.exists(seeded_db)
+
+    with open(out) as f:
+        lines = f.read().strip().splitlines()
+    assert len(lines) == 2
+    rows = [json.loads(line) for line in lines]
+    assert {r["route"] for r in rows} == {"SIN|KUL", "SIN|BKK"}
+    assert {r["flights"][0]["price"] for r in rows} == {100, 90}
+
+
+async def test_convert_keep_db(seeded_db, tmp_path):
+    out = str(tmp_path / "out.jsonl")
+    await convert(seeded_db, out, delete=False)
+    assert os.path.exists(seeded_db)
+
+
+async def test_convert_empty_db_writes_nothing(tmp_path):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    await repo.close()
+    out = str(tmp_path / "out.jsonl")
+    path = await convert(db, out, delete=False)
+    assert path == out
+    assert not os.path.exists(out)
+
+
+def test_jsonl_row_passthrough_flights_string():
+    row = {
+        "route": "SIN|KUL",
+        "dep_date": "2026-08-01",
+        "origin": "SIN",
+        "destination": "KUL",
+        "flights": '[{"price": 100}]',
+        "searched_at": "2026-01-01T00:00:00Z",
+    }
+    line = _jsonl_row(row)
+    parsed = json.loads(line)
+    assert parsed == {
+        "route": "SIN|KUL",
+        "dep_date": "2026-08-01",
+        "origin": "SIN",
+        "destination": "KUL",
+        "flights": [{"price": 100}],
+        "searched_at": "2026-01-01T00:00:00Z",
+    }
