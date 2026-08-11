@@ -261,8 +261,6 @@ class BulkSearchPipeline:
             if not failed:
                 logger.info("No failed tasks to retry")
                 return
-            logger.info("Retry round %d/%d: %d tasks", rnd, rounds, len(failed))
-
             if self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY:
                 logger.info(
                     "Proxy pool low (%d); refreshing before retry round %d",
@@ -278,6 +276,9 @@ class BulkSearchPipeline:
                     retry_tasks.append((provider, origin, dest, dep_date))
 
             if retry_tasks:
+                logger.info(
+                    "Retry round %d/%d: %d tasks", rnd, rounds, len(retry_tasks)
+                )
                 await self._run_batch(
                     retry_tasks,
                     f"Retry round {rnd}/{rounds}",
