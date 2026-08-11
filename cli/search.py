@@ -35,8 +35,8 @@ def configure_parser(subparsers: Any):
     p.add_argument(
         "--workers",
         type=int,
-        default=200,
-        help="Max concurrent searches (default: 200)",
+        default=50,
+        help="Max concurrent searches (default: 50)",
     )
     p.add_argument(
         "--verbose",

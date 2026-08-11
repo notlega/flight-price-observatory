@@ -43,7 +43,7 @@ class BulkSearchPipeline:
         self,
         providers: list[BaseProvider],
         rate: float = 200,
-        max_concurrent: int = 200,
+        max_concurrent: int = 50,
         db_path: str = "storage/db/search_state.db",
         currency: str = "SGD",
     ):
@@ -81,6 +81,8 @@ class BulkSearchPipeline:
                 session=session,
             )
             await self.rate_limiter.report_success()
+            if not flights:
+                return AttemptResult(None, ErrorType.DATA, proxy_info)
             return AttemptResult(flights, None, proxy_info)
         except ProviderRateLimitedError:
             await self.rate_limiter.report_429()

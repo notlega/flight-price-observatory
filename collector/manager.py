@@ -19,7 +19,7 @@ class CollectorManager:
         max_days_ahead: int = 330,
         currency: str = "SGD",
         rate: float = 200,
-        workers: int = 200,
+        workers: int = 50,
         db_path: str = "storage/db/search_state.db",
     ):
         providers: list[BaseProvider] = [

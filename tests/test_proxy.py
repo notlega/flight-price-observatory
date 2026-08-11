@@ -11,6 +11,7 @@ from collector.proxy import (
     _parse_all_sources,
     _parse_source,
     _save_cache,
+    _tcp_alive,
     _validate_proxy,
 )
 
@@ -114,10 +115,79 @@ async def test_validate_bounded_workers():
     with (
         patch("collector.proxy._validate_proxy", side_effect=fake_validate),
         patch("collector.proxy.AsyncSession", new=FakeCurlSession),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
     ):
         valid = await rot._validate(proxies)
 
     assert [p.url for p in valid] == ["http://0:1", "http://3:1"]
+
+
+async def test_validate_early_exit_hits_target():
+    proxies = [make_proxy(url=f"http://{i}:1") for i in range(5)]
+    rot = ProxyRotator(max_concurrent=2)
+
+    async def fake_validate(proxy, session):
+        proxy.quality_score = 1.3
+        return proxy
+
+    with (
+        patch("collector.proxy._validate_proxy", side_effect=fake_validate),
+        patch("collector.proxy.AsyncSession", new=FakeCurlSession),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
+    ):
+        valid = await rot._validate(proxies, target=2)
+
+    assert len(valid) == 2
+
+
+async def test_validate_prefilter_drops_dead_tcp():
+    proxies = [make_proxy(url=f"http://{i}:1") for i in range(4)]
+    rot = ProxyRotator(max_concurrent=2)
+
+    async def fake_validate(proxy, session):
+        proxy.quality_score = 1.3
+        return proxy
+
+    with (
+        patch("collector.proxy._validate_proxy", side_effect=fake_validate),
+        patch("collector.proxy.AsyncSession", new=FakeCurlSession),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps[2:]),
+    ):
+        valid = await rot._validate(proxies)
+
+    assert [p.url for p in valid] == ["http://2:1", "http://3:1"]
+
+
+async def test_tcp_alive_true_for_reachable():
+    writer = Mock()
+    writer.close = Mock()
+    writer.wait_closed = AsyncMock()
+    with patch(
+        "collector.proxy.asyncio.open_connection",
+        new=AsyncMock(return_value=(Mock(), writer)),
+    ) as conn:
+        assert await _tcp_alive("http://1.2.3.4:8080") is True
+    conn.assert_awaited_once_with("1.2.3.4", 8080)
+
+
+async def test_tcp_alive_false_on_error():
+    with patch(
+        "collector.proxy.asyncio.open_connection",
+        new=AsyncMock(side_effect=OSError("refused")),
+    ):
+        assert await _tcp_alive("http://1.2.3.4:8080") is False
+
+
+async def test_tcp_alive_strips_brackets_ipv6():
+    writer = Mock()
+    writer.close = Mock()
+    writer.wait_closed = AsyncMock()
+    with patch(
+        "collector.proxy.asyncio.open_connection",
+        new=AsyncMock(return_value=(Mock(), writer)),
+    ) as conn:
+        assert await _tcp_alive("http://[::1]:8080") is True
+    conn.assert_awaited_once_with("::1", 8080)
 
 
 async def test_save_load_cache_roundtrip(tmp_path):
@@ -139,7 +209,21 @@ async def test_load_cache_missing_file_returns_none(tmp_path):
 
 async def test_rotator_returns_none_when_empty():
     rot = ProxyRotator()
-    assert await rot.get_proxy() is None
+    with patch.object(rot, "_auto_refresh", new=AsyncMock()):
+        assert await rot.get_proxy() is None
+
+
+async def test_get_proxy_waits_for_refresh_when_empty():
+    rot = ProxyRotator()
+    proxy = make_proxy(url="http://a:1")
+
+    async def fake_auto_refresh():
+        await rot._set_pool([proxy])
+
+    with patch.object(rot, "_auto_refresh", side_effect=fake_auto_refresh):
+        p = await rot.get_proxy()
+    assert p is not None
+    assert p.url == "http://a:1"
 
 
 async def test_rotator_picks_from_pool_and_removes_failure():
@@ -194,7 +278,7 @@ async def test_refresh_force_skips_cache():
     with (
         patch("collector.proxy._load_cache") as load,
         patch("collector.proxy._parse_all_sources", return_value=[make_proxy(url="http://x:1")]),
-        patch("collector.proxy.ProxyRotator._validate", side_effect=lambda proxies: proxies),
+        patch("collector.proxy.ProxyRotator._validate", side_effect=lambda ps, target=None: ps),
         patch("collector.proxy._save_cache"),
     ):
         await rot.refresh(force=True)

@@ -46,7 +46,7 @@ async def test_get_failed_filters_error_types(repo):
     await repo.flush()
 
     failed = await repo.get_failed(max_retries=3)
-    assert {r[0] for r in failed} == {"r1", "r2"}
+    assert {r[0] for r in failed} == {"r1", "r2", "r4", "r5"}
 
 
 async def test_get_failed_respects_max_retries(repo):

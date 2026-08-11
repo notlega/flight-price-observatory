@@ -29,6 +29,11 @@ _TEST_ECHO_URLS = [
     "https://icanhazip.com",
 ]
 
+_TCP_TIMEOUT = 3.0
+_HTTP_ECHO_TIMEOUT = 5.0
+_TCP_FILTER_LIMIT = 500
+_VALIDATE_TARGET = 100
+
 
 def _build_sources() -> list[tuple[str, str]]:
     protocols = ["http", "https", "socks4", "socks5"]
@@ -132,22 +137,60 @@ async def _parse_all_sources(max_per_source: int = 0) -> list[ProxyInfo]:
 async def _test_http_echo(
     proxy_url: str,
     session: AsyncSession,
-    timeout: float = 5.0,
+    timeout: float = _HTTP_ECHO_TIMEOUT,
 ) -> float:
-    url = random.choice(_TEST_ECHO_URLS)
-    t0 = time.monotonic()
+    async def probe(url: str) -> float:
+        t0 = time.monotonic()
+        try:
+            r = await session.get(
+                url,
+                proxies={"all": proxy_url},
+                timeout=timeout,
+            )
+            latency = (time.monotonic() - t0) * 1000
+            if r.status_code == 200:
+                return latency
+        except Exception:
+            pass
+        return 0.0
+
+    results = await asyncio.gather(
+        *[probe(u) for u in _TEST_ECHO_URLS],
+        return_exceptions=True,
+    )
+    latencies = [r for r in results if isinstance(r, float) and r > 0]
+    return min(latencies) if latencies else 0.0
+
+
+async def _tcp_alive(url: str, timeout: float = _TCP_TIMEOUT) -> bool:
     try:
-        r = await session.get(
-            url,
-            proxies={"all": proxy_url},
+        hostport = url.split("://", 1)[1].rstrip("/")
+        host, sep, port = hostport.rpartition(":")
+        if not sep or not port:
+            return False
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host.strip("[]"), int(port)),
             timeout=timeout,
         )
-        latency = (time.monotonic() - t0) * 1000
-        if r.status_code == 200:
-            return latency
-        return 0.0
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
     except Exception:
-        return 0.0
+        return False
+
+
+async def _prefilter_tcp(proxies: list[ProxyInfo]) -> list[ProxyInfo]:
+    sem = asyncio.Semaphore(_TCP_FILTER_LIMIT)
+
+    async def check(proxy: ProxyInfo) -> bool:
+        async with sem:
+            return await _tcp_alive(proxy.url)
+
+    results = await asyncio.gather(*[check(p) for p in proxies])
+    return [p for p, ok in zip(proxies, results) if ok]
 
 
 async def _validate_proxy(
@@ -199,7 +242,7 @@ def _save_cache(proxies: list[ProxyInfo]) -> None:
 class ProxyRotator:
     def __init__(
         self,
-        max_concurrent: int = 100,
+        max_concurrent: int = 200,
         max_per_source: int = 500,
     ):
         self._proxies: list[ProxyInfo] = []
@@ -213,16 +256,30 @@ class ProxyRotator:
         self._refresh_task: asyncio.Task | None = None
         self._schedule_lock = asyncio.Lock()
 
-    async def _validate(self, proxies: list[ProxyInfo]) -> list[ProxyInfo]:
+    async def _validate(
+        self, proxies: list[ProxyInfo], target: int | None = None
+    ) -> list[ProxyInfo]:
+        if not proxies:
+            return []
+
+        logger.info("TCP prefiltering %d proxies", len(proxies))
+        alive = await _prefilter_tcp(proxies)
+        logger.info("TCP-alive: %d/%d", len(alive), len(proxies))
+        if not alive:
+            return []
+        proxies = alive
+
         queue: asyncio.Queue[ProxyInfo | None] = asyncio.Queue()
         for p in proxies:
             queue.put_nowait(p)
 
         valid: list[ProxyInfo] = []
 
-        async with AsyncSession() as session:
-            async def worker():
+        async def worker():
+            async with AsyncSession() as session:
                 while True:
+                    if target is not None and len(valid) >= target:
+                        return
                     proxy = await queue.get()
                     if proxy is None:
                         return
@@ -233,14 +290,14 @@ class ProxyRotator:
                     finally:
                         pbar.update(1)
 
-            n_workers = min(self._max_concurrent, max(len(proxies), 1))
-            for _ in range(n_workers):
-                queue.put_nowait(None)
-            with tqdm(
-                total=len(proxies), desc="Testing proxies", unit="px"
-            ) as pbar:
-                workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
-                await asyncio.gather(*workers)
+        n_workers = min(self._max_concurrent, max(len(proxies), 1))
+        for _ in range(n_workers):
+            queue.put_nowait(None)
+        with tqdm(
+            total=len(proxies), desc="Testing proxies", unit="px"
+        ) as pbar:
+            workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
+            await asyncio.gather(*workers)
 
         valid.sort(key=lambda p: p.quality_score, reverse=True)
         return valid
@@ -306,25 +363,34 @@ class ProxyRotator:
             return
         logger.info("Total unique proxies: %d", len(all_proxies))
 
-        valid = await self._validate(all_proxies)
+        valid = await self._validate(all_proxies, target=_VALIDATE_TARGET)
         await self._apply_valid(valid, len(all_proxies))
 
+    def _pick(self) -> ProxyInfo | None:
+        if not self._proxies:
+            return None
+        if len(self._cum_weights) != len(self._proxies):
+            self._recompute_weights()
+        total = self._total_weight
+        if total <= 0:
+            proxy = self._proxies[self._index % len(self._proxies)]
+            self._index += 1
+        else:
+            r = random.uniform(0, total)
+            i = bisect_left(self._cum_weights, r)
+            proxy = self._proxies[min(i, len(self._proxies) - 1)]
+        return proxy
+
     async def get_proxy(self) -> ProxyInfo | None:
-        proxy = None
         async with self._lock:
-            if self._proxies:
-                if len(self._cum_weights) != len(self._proxies):
-                    self._recompute_weights()
-                total = self._total_weight
-                if total <= 0:
-                    proxy = self._proxies[self._index % len(self._proxies)]
-                    self._index += 1
-                else:
-                    r = random.uniform(0, total)
-                    i = bisect_left(self._cum_weights, r)
-                    proxy = self._proxies[min(i, len(self._proxies) - 1)]
+            proxy = self._pick()
         if proxy is None:
             await self._ensure_refresh_task()
+            task = self._refresh_task
+            if task is not None and not task.done():
+                await task
+            async with self._lock:
+                proxy = self._pick()
         return proxy
 
     async def _ensure_refresh_task(self):

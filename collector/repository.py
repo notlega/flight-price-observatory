@@ -35,6 +35,8 @@ _RETRY_ERROR_TYPES = (
     ErrorType.RATE_LIMITED,
     ErrorType.TIMEOUT,
     ErrorType.CONNECTION,
+    ErrorType.NO_PROXY,
+    ErrorType.DATA,
 )
 
 _WRITE_BATCH_SIZE = 500
@@ -206,6 +208,11 @@ class SearchRepository:
 
     async def delete_db(self):
         await self.close()
-        if os.path.exists(self._db_path):
-            os.remove(self._db_path)
-            logger.info("Deleted SQLite state: %s", self._db_path)
+        for path in (
+            self._db_path,
+            f"{self._db_path}-shm",
+            f"{self._db_path}-wal",
+        ):
+            if os.path.exists(path):
+                os.remove(path)
+        logger.info("Deleted SQLite state: %s", self._db_path)
