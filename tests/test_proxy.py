@@ -102,6 +102,32 @@ async def test_parse_all_sources_dedups_and_caps():
     assert {p.url for p in proxies} == {"http://a:1", "http://b:2", "http://c:3"}
 
 
+async def test_validate_uses_per_worker_sessions():
+    class SessionFactory:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self):
+            self.calls += 1
+            return FakeCurlSession()
+
+    proxies = [make_proxy(url=f"http://{i}:1") for i in range(5)]
+    rot = ProxyRotator(max_concurrent=2)
+    factory = SessionFactory()
+
+    async def fake_validate(proxy, session):
+        return proxy
+
+    with (
+        patch("collector.proxy._validate_proxy", side_effect=fake_validate),
+        patch("collector.proxy.AsyncSession", factory),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
+    ):
+        await rot._validate(proxies)
+
+    assert factory.calls == 2
+
+
 async def test_validate_bounded_workers():
     proxies = [make_proxy(url=f"http://{i}:1") for i in range(5)]
     rot = ProxyRotator(max_concurrent=2)
@@ -224,6 +250,26 @@ async def test_get_proxy_waits_for_refresh_when_empty():
         p = await rot.get_proxy()
     assert p is not None
     assert p.url == "http://a:1"
+
+
+async def test_get_proxy_concurrent_calls_single_refresh():
+    rot = ProxyRotator()
+    proxy = make_proxy(url="http://a:1")
+    started = asyncio.Event()
+
+    async def fake_auto_refresh():
+        started.set()
+        await asyncio.sleep(0.01)
+        await rot._set_pool([proxy])
+
+    with patch.object(rot, "_auto_refresh", side_effect=fake_auto_refresh) as refresh:
+        calls = [asyncio.create_task(rot.get_proxy()) for _ in range(10)]
+        await started.wait()
+        await asyncio.sleep(0.02)
+        results = await asyncio.gather(*calls)
+
+    assert refresh.await_count == 1
+    assert all(p is not None for p in results)
 
 
 async def test_rotator_picks_from_pool_and_removes_failure():

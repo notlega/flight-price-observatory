@@ -54,6 +54,22 @@ async def test_convert_empty_db_writes_nothing(tmp_path):
     assert not os.path.exists(out)
 
 
+async def test_convert_null_flights_exports_empty_array(tmp_path):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    await repo.upsert(
+        "SIN|KUL", "2026-08-01", "SIN", "KUL", None, None, 0, True, "t1"
+    )
+    await repo.flush()
+    await repo.close()
+    out = str(tmp_path / "out.jsonl")
+    await convert(db, out, delete=False)
+    with open(out) as f:
+        row = json.loads(f.readline())
+    assert row["flights"] == []
+
+
 def test_jsonl_row_passthrough_flights_string():
     row = {
         "route": "SIN|KUL",

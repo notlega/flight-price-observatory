@@ -1,6 +1,7 @@
 import os
 
-from collector.repository import SearchRepository
+from collector.errors import ErrorType
+from collector.repository import SearchRepository, _RETRY_ERROR_TYPES
 
 
 async def test_upsert_flush_counts(repo):
@@ -47,6 +48,17 @@ async def test_get_failed_filters_error_types(repo):
 
     failed = await repo.get_failed(max_retries=3)
     assert {r[0] for r in failed} == {"r1", "r2", "r4", "r5"}
+
+
+def test_retry_error_types_cover_transient_and_proxy_errors():
+    assert set(_RETRY_ERROR_TYPES) == {
+        ErrorType.RATE_LIMITED,
+        ErrorType.TIMEOUT,
+        ErrorType.CONNECTION,
+        ErrorType.NO_PROXY,
+        ErrorType.DATA,
+    }
+    assert ErrorType.OTHER not in _RETRY_ERROR_TYPES
 
 
 async def test_get_failed_respects_max_retries(repo):

@@ -22,6 +22,22 @@ ROUTE = f"{SIN.value}|{KUL.value}"
 DEP = "2026-08-01"
 
 
+def test_pipeline_default_workers_bounded():
+    pipeline = BulkSearchPipeline(providers=[], rate=10)
+    assert pipeline.max_concurrent == 50
+
+
+def test_search_parser_worker_default():
+    from argparse import ArgumentParser
+
+    from cli.search import configure_parser
+
+    parser = ArgumentParser()
+    configure_parser(parser.add_subparsers())
+    ns = parser.parse_args(["search", "--start", "2026-08-01"])
+    assert ns.workers == 50
+
+
 class _FakeTqdm:
     def __init__(self, **kwargs):
         pass
@@ -59,6 +75,19 @@ async def test_attempt_once_success():
     assert result.proxy_info is proxy
 
 
+async def test_attempt_once_empty_result_is_data_error():
+    pipeline = _make_pipeline(
+        provider=FakeProvider(script=[None]),
+        rotator=FakeRotator(proxies=[make_proxy()]),
+    )
+    result = await pipeline._attempt_once(
+        pipeline.providers[0], SIN, KUL, DEP, AsyncMock()
+    )
+    assert result.error_type == ErrorType.DATA
+    assert result.flights is None
+    assert result.proxy_info is not None
+
+
 async def test_attempt_once_no_proxy():
     pipeline = _make_pipeline(rotator=FakeRotator(proxies=[]))
     with patch("collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()):
@@ -67,6 +96,17 @@ async def test_attempt_once_no_proxy():
         )
     assert result.error_type == ErrorType.NO_PROXY
     assert result.proxy_info is None
+
+
+async def test_attempt_once_empty_list_is_data_error():
+    pipeline = _make_pipeline(
+        provider=FakeProvider(script=[[]]),
+        rotator=FakeRotator(proxies=[make_proxy()]),
+    )
+    result = await pipeline._attempt_once(
+        pipeline.providers[0], SIN, KUL, DEP, AsyncMock()
+    )
+    assert result.error_type == ErrorType.DATA
 
 
 @pytest.mark.parametrize(
@@ -192,6 +232,21 @@ async def test_retry_loop_stops_when_nothing_failed():
     pipeline = _make_pipeline(repo=FakeRepo())
     await pipeline._retry_loop(rounds=3)
     assert pipeline.rotator.refreshes == []
+
+
+@pytest.mark.parametrize("error_type", [ErrorType.NO_PROXY, ErrorType.DATA])
+async def test_retry_loop_recovers_no_proxy_and_data(error_type):
+    provider = FakeProvider(script=[make_flights(100)])
+    repo = FakeRepo()
+    repo.failed = [(ROUTE, DEP)]
+    repo.upserts = [{"error_type": error_type, "success": False}]
+    pipeline = _make_pipeline(provider=provider, repo=repo)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
+    ):
+        await pipeline._retry_loop(rounds=1)
+    assert repo.upserts[-1]["success"] is True
 
 
 async def test_run_orchestrates_end_to_end(tmp_path):
