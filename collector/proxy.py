@@ -34,6 +34,8 @@ _HTTP_ECHO_TIMEOUT = 5.0
 _TCP_FILTER_LIMIT = 500
 _VALIDATE_TARGET = 100
 
+_RATE_LIMIT_COOLDOWN = 60
+
 
 def _build_sources() -> list[tuple[str, str]]:
     protocols = ["http", "https", "socks4", "socks5"]
@@ -253,6 +255,7 @@ class ProxyRotator:
         self._max_per_source = max_per_source
         self._cum_weights: list[float] = []
         self._total_weight = 0.0
+        self._weight_pool_len = 0
         self._refresh_task: asyncio.Task | None = None
         self._schedule_lock = asyncio.Lock()
 
@@ -307,6 +310,7 @@ class ProxyRotator:
             self._proxies = proxies
             self._index = 0
             self._last_refresh = time.monotonic()
+            self._weight_pool_len = len(proxies)
             self._recompute_weights()
 
     async def _apply_valid(self, valid: list[ProxyInfo], total: int):
@@ -319,10 +323,11 @@ class ProxyRotator:
             len(valid) / max(total, 1) * 100,
         )
 
-    def _recompute_weights(self):
+    def _recompute_weights(self, pool: list[ProxyInfo] | None = None):
+        pool = pool if pool is not None else self._proxies
         self._cum_weights = []
         total = 0.0
-        for p in self._proxies:
+        for p in pool:
             total += p.quality_score
             self._cum_weights.append(total)
         self._total_weight = total
@@ -367,18 +372,24 @@ class ProxyRotator:
         await self._apply_valid(valid, len(all_proxies))
 
     def _pick(self) -> ProxyInfo | None:
-        if not self._proxies:
+        now = time.monotonic()
+        if any(p.rate_limit_until > now for p in self._proxies):
+            pool = [p for p in self._proxies if p.rate_limit_until <= now]
+        else:
+            pool = self._proxies
+        if not pool:
             return None
-        if len(self._cum_weights) != len(self._proxies):
-            self._recompute_weights()
+        if len(pool) != self._weight_pool_len:
+            self._recompute_weights(pool)
+            self._weight_pool_len = len(pool)
         total = self._total_weight
         if total <= 0:
-            proxy = self._proxies[self._index % len(self._proxies)]
+            proxy = pool[self._index % len(pool)]
             self._index += 1
         else:
             r = random.uniform(0, total)
             i = bisect_left(self._cum_weights, r)
-            proxy = self._proxies[min(i, len(self._proxies) - 1)]
+            proxy = pool[min(i, len(pool) - 1)]
         return proxy
 
     async def get_proxy(self) -> ProxyInfo | None:
@@ -419,6 +430,16 @@ class ProxyRotator:
                 )
             except ValueError:
                 pass
+
+    async def report_rate_limited(self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN):
+        async with self._lock:
+            proxy.rate_limit_until = time.monotonic() + seconds
+            self._weight_pool_len = 0
+            logger.debug(
+                "Proxy %s rate-limited; parked for %.0fs",
+                proxy.url,
+                seconds,
+            )
 
     def working_count(self) -> int:
         return len(self._proxies)

@@ -91,12 +91,15 @@ async def test_parse_all_sources_dedups_and_caps():
     a = make_proxy(url="http://a:1")
     b = make_proxy(url="http://b:2")
     c = make_proxy(url="http://c:3")
-    with patch(
-        "collector.proxy._parse_source",
-        side_effect=[[a, b], [b, c], [a]],
-    ), patch(
-        "collector.proxy._PROXY_SOURCES",
-        [("http", "s1"), ("http", "s2"), ("http", "s3")],
+    with (
+        patch(
+            "collector.proxy._parse_source",
+            side_effect=[[a, b], [b, c], [a]],
+        ),
+        patch(
+            "collector.proxy._PROXY_SOURCES",
+            [("http", "s1"), ("http", "s2"), ("http", "s3")],
+        ),
     ):
         proxies = await _parse_all_sources(max_per_source=5)
     assert {p.url for p in proxies} == {"http://a:1", "http://b:2", "http://c:3"}
@@ -299,6 +302,40 @@ async def test_rotator_weights_favor_high_quality():
     assert fast > 150
 
 
+async def test_report_rate_limited_parks_proxy_and_skips_it():
+    rot = ProxyRotator()
+    rot._proxies = [
+        make_proxy(url="http://a:1"),
+        make_proxy(url="http://b:2"),
+    ]
+    victim = rot._proxies[0]
+    await rot.report_rate_limited(victim, seconds=60)
+
+    picks = [await rot.get_proxy() for _ in range(30)]
+    assert all(p.url != "http://a:1" for p in picks)
+    assert rot.working_count() == 2
+    assert "http://b:2" in {p.url for p in picks}
+
+
+async def test_pick_returns_none_when_all_proxies_parked():
+    rot = ProxyRotator()
+    rot._proxies = [make_proxy(url="http://a:1")]
+    await rot.report_rate_limited(rot._proxies[0], seconds=60)
+    with patch.object(rot, "_auto_refresh", new=AsyncMock()):
+        assert await rot.get_proxy() is None
+
+
+async def test_parked_proxy_returns_after_cooldown_expires():
+    rot = ProxyRotator()
+    proxy = make_proxy(url="http://a:1")
+    rot._proxies = [proxy]
+    await rot.report_rate_limited(proxy, seconds=0.05)
+    with patch.object(rot, "_auto_refresh", new=AsyncMock()):
+        assert await rot.get_proxy() is None
+    await asyncio.sleep(0.1)
+    assert await rot.get_proxy() is proxy
+
+
 async def test_get_proxy_empty_triggers_auto_refresh():
     rot = ProxyRotator()
     with patch.object(rot, "_auto_refresh", new=AsyncMock()) as refresh:
@@ -323,8 +360,14 @@ async def test_refresh_force_skips_cache():
     rot = ProxyRotator()
     with (
         patch("collector.proxy._load_cache") as load,
-        patch("collector.proxy._parse_all_sources", return_value=[make_proxy(url="http://x:1")]),
-        patch("collector.proxy.ProxyRotator._validate", side_effect=lambda ps, target=None: ps),
+        patch(
+            "collector.proxy._parse_all_sources",
+            return_value=[make_proxy(url="http://x:1")],
+        ),
+        patch(
+            "collector.proxy.ProxyRotator._validate",
+            side_effect=lambda ps, target=None: ps,
+        ),
         patch("collector.proxy._save_cache"),
     ):
         await rot.refresh(force=True)

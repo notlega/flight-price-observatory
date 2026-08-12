@@ -8,6 +8,7 @@ class ProxyInfo:
     quality_score: float = 1.0
     latency_ms: float = 0.0
     last_validated: float = 0.0
+    rate_limit_until: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -16,6 +17,7 @@ class ProxyInfo:
             "quality_score": self.quality_score,
             "latency_ms": self.latency_ms,
             "last_validated": self.last_validated,
+            "rate_limit_until": self.rate_limit_until,
         }
 
     @staticmethod
@@ -26,4 +28,5 @@ class ProxyInfo:
             quality_score=float(data.get("quality_score", 1.0)),
             latency_ms=float(data.get("latency_ms", 0.0)),
             last_validated=float(data.get("last_validated", 0.0)),
+            rate_limit_until=float(data.get("rate_limit_until", 0.0)),
         )
