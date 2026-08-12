@@ -16,18 +16,16 @@ class FakeProvider(BaseProvider):
 
     def __init__(
         self,
-        routes: list[tuple[Airport, Airport]] | None = None,
+        supports: set[tuple[str, str]] | None = None,
         script: list = None,
     ):
-        self._routes = list(
-            routes or [(Airport["SIN"], Airport["KUL"])]
-        )
+        self._supports = supports or {("SIN", "KUL")}
         self.script = list(script or [])
         self.calls: list[tuple[Airport, Airport, str, str | None]] = []
 
     @property
-    def routes(self) -> list[tuple[Airport, Airport]]:
-        return self._routes
+    def supports(self) -> set[tuple[str, str]] | None:
+        return self._supports
 
     async def search(
         self,
@@ -37,8 +35,9 @@ class FakeProvider(BaseProvider):
         currency: str = "SGD",
         proxy_url: str | None = None,
         session=None,
+        return_date: str | None = None,
     ) -> list[dict] | None:
-        self.calls.append((origin, dest, date_str, proxy_url))
+        self.calls.append((origin, dest, date_str, proxy_url, return_date))
         if self.script:
             item = self.script.pop(0)
             if isinstance(item, BaseException):
@@ -52,6 +51,7 @@ class FakeRotator:
         self._proxies = list(proxies or [])
         self._working = working
         self.failures: list[ProxyInfo | None] = []
+        self.rate_limited: list[tuple[ProxyInfo | None, float]] = []
         self.refreshes: list[tuple[bool, int | None]] = []
 
     async def get_proxy(self) -> ProxyInfo | None:
@@ -59,6 +59,9 @@ class FakeRotator:
 
     async def report_failure(self, proxy: ProxyInfo | None):
         self.failures.append(proxy)
+
+    async def report_rate_limited(self, proxy: ProxyInfo, seconds: float = 60):
+        self.rate_limited.append((proxy, seconds))
 
     def working_count(self) -> int:
         return self._working
@@ -70,7 +73,7 @@ class FakeRotator:
 class FakeRepo:
     def __init__(self):
         self.upserts: list[dict] = []
-        self.failed: list[tuple[str, str]] = []
+        self.failed: list[tuple[str, str, str, str]] = []
         self.success_count = 0
         self.failed_count = 0
         self.inserted: list[tuple] = []
@@ -88,6 +91,8 @@ class FakeRepo:
         self,
         route: str,
         dep_date: str,
+        return_date: str,
+        flight_type: str,
         origin: str,
         destination: str,
         flights: list[dict] | None,
@@ -100,6 +105,8 @@ class FakeRepo:
             {
                 "route": route,
                 "dep_date": dep_date,
+                "return_date": return_date,
+                "flight_type": flight_type,
                 "origin": origin,
                 "destination": destination,
                 "flights": flights,
@@ -110,10 +117,10 @@ class FakeRepo:
             }
         )
 
-    async def insert_ignore_all(self, tasks: list[tuple[str, str, str, str]]):
+    async def insert_ignore_all(self, tasks: list[tuple[str, str, str, str, str, str]]):
         self.inserted.extend(tasks)
 
-    async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str]]:
+    async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
         return list(self.failed)
 
     async def count_status(self) -> tuple[int, int]:
@@ -137,9 +144,7 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.exceptions.HTTPError(
-                f"HTTP {self.status_code}"
-            )
+            raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
 
 
 class FakeSession:

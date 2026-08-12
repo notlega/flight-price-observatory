@@ -20,6 +20,10 @@ def _jsonl_row(row: dict) -> str:
         + json.dumps(row["route"], ensure_ascii=False)
         + ',"dep_date":'
         + json.dumps(row["dep_date"])
+        + ',"return_date":'
+        + json.dumps(row["return_date"])
+        + ',"flight_type":'
+        + json.dumps(row["flight_type"])
         + ',"origin":'
         + json.dumps(row["origin"])
         + ',"destination":'
@@ -70,4 +74,3 @@ async def convert(
         await repo.close()
 
     return output_path
-

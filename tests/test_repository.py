@@ -8,6 +8,8 @@ async def test_upsert_flush_counts(repo):
     await repo.upsert(
         "SIN|KUL",
         "2026-08-01",
+        "",
+        "ONE_WAY",
         "SIN",
         "KUL",
         [{"price": 100}],
@@ -23,10 +25,30 @@ async def test_upsert_flush_counts(repo):
 
 async def test_upsert_replace_same_primary_key(repo):
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "SIN", "KUL", [{"price": 100}], None, 0, True, "t1"
+        "SIN|KUL",
+        "2026-08-01",
+        "",
+        "ONE_WAY",
+        "SIN",
+        "KUL",
+        [{"price": 100}],
+        None,
+        0,
+        True,
+        "t1",
     )
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "SIN", "KUL", [{"price": 200}], None, 0, True, "t2"
+        "SIN|KUL",
+        "2026-08-01",
+        "",
+        "ONE_WAY",
+        "SIN",
+        "KUL",
+        [{"price": 200}],
+        None,
+        0,
+        True,
+        "t2",
     )
     await repo.flush()
     rows = [r async for r in repo.iter_successful()]
@@ -43,7 +65,7 @@ async def test_get_failed_filters_error_types(repo):
         ("r5", "2026-08-01", "O", "D", "data"),
     ]
     for route, dep, o, d, err in seeds:
-        await repo.upsert(route, dep, o, d, None, err, 2, False, "t")
+        await repo.upsert(route, dep, "", "ONE_WAY", o, d, None, err, 2, False, "t")
     await repo.flush()
 
     failed = await repo.get_failed(max_retries=3)
@@ -62,8 +84,12 @@ def test_retry_error_types_cover_transient_and_proxy_errors():
 
 
 async def test_get_failed_respects_max_retries(repo):
-    await repo.upsert("r1", "2026-08-01", "O", "D", None, "429", 2, False, "t")
-    await repo.upsert("r2", "2026-08-01", "O", "D", None, "429", 3, False, "t")
+    await repo.upsert(
+        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 2, False, "t"
+    )
+    await repo.upsert(
+        "r2", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 3, False, "t"
+    )
     await repo.flush()
 
     failed = await repo.get_failed(max_retries=3)
@@ -71,9 +97,15 @@ async def test_get_failed_respects_max_retries(repo):
 
 
 async def test_count_by_error(repo):
-    await repo.upsert("r1", "2026-08-01", "O", "D", None, "429", 2, False, "t")
-    await repo.upsert("r2", "2026-08-01", "O", "D", None, "timeout", 2, False, "t")
-    await repo.upsert("r3", "2026-08-01", "O", "D", None, "429", 2, False, "t")
+    await repo.upsert(
+        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 2, False, "t"
+    )
+    await repo.upsert(
+        "r2", "2026-08-01", "", "ONE_WAY", "O", "D", None, "timeout", 2, False, "t"
+    )
+    await repo.upsert(
+        "r3", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 2, False, "t"
+    )
     await repo.flush()
 
     counts = dict(await repo.count_by_error())
@@ -82,10 +114,22 @@ async def test_count_by_error(repo):
 
 async def test_insert_ignore_all_does_not_overwrite(repo):
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "SIN", "KUL", [{"price": 100}], None, 0, True, "t1"
+        "SIN|KUL",
+        "2026-08-01",
+        "",
+        "ONE_WAY",
+        "SIN",
+        "KUL",
+        [{"price": 100}],
+        None,
+        0,
+        True,
+        "t1",
     )
     await repo.flush()
-    await repo.insert_ignore_all([("SIN|KUL", "2026-08-01", "SIN", "KUL")])
+    await repo.insert_ignore_all(
+        [("SIN|KUL", "2026-08-01", "", "ONE_WAY", "SIN", "KUL")]
+    )
     rows = [r async for r in repo.iter_successful()]
     assert len(rows) == 1
 
@@ -105,7 +149,9 @@ async def test_close_flushes_pending_batch(tmp_path):
     db = str(tmp_path / "state.db")
     repo = SearchRepository(db)
     await repo.open()
-    await repo.upsert("r1", "2026-08-01", "O", "D", None, "timeout", 0, False, "t")
+    await repo.upsert(
+        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "timeout", 0, False, "t"
+    )
     await repo.close()
 
     reopened = SearchRepository(db)
@@ -117,7 +163,17 @@ async def test_close_flushes_pending_batch(tmp_path):
 
 async def test_iter_successful_raw_preserves_json_string(repo):
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "SIN", "KUL", [{"price": 100}], None, 0, True, "t1"
+        "SIN|KUL",
+        "2026-08-01",
+        "",
+        "ONE_WAY",
+        "SIN",
+        "KUL",
+        [{"price": 100}],
+        None,
+        0,
+        True,
+        "t1",
     )
     await repo.flush()
     rows = [r async for r in repo.iter_successful_raw()]

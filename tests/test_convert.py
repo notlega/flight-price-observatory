@@ -13,10 +13,30 @@ async def seeded_db(tmp_path):
     repo = SearchRepository(db)
     await repo.open()
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "SIN", "KUL", [{"price": 100}], None, 0, True, "t1"
+        "SIN|KUL",
+        "2026-08-01",
+        "",
+        "ONE_WAY",
+        "SIN",
+        "KUL",
+        [{"price": 100}],
+        None,
+        0,
+        True,
+        "t1",
     )
     await repo.upsert(
-        "SIN|BKK", "2026-08-01", "SIN", "BKK", [{"price": 90}], None, 0, True, "t2"
+        "SIN|BKK",
+        "2026-08-01",
+        "",
+        "ONE_WAY",
+        "SIN",
+        "BKK",
+        [{"price": 90}],
+        None,
+        0,
+        True,
+        "t2",
     )
     await repo.flush()
     await repo.close()
@@ -59,7 +79,7 @@ async def test_convert_null_flights_exports_empty_array(tmp_path):
     repo = SearchRepository(db)
     await repo.open()
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "SIN", "KUL", None, None, 0, True, "t1"
+        "SIN|KUL", "2026-08-01", "", "ONE_WAY", "SIN", "KUL", None, None, 0, True, "t1"
     )
     await repo.flush()
     await repo.close()
@@ -74,6 +94,8 @@ def test_jsonl_row_passthrough_flights_string():
     row = {
         "route": "SIN|KUL",
         "dep_date": "2026-08-01",
+        "return_date": "",
+        "flight_type": "ONE_WAY",
         "origin": "SIN",
         "destination": "KUL",
         "flights": '[{"price": 100}]',
@@ -84,6 +106,8 @@ def test_jsonl_row_passthrough_flights_string():
     assert parsed == {
         "route": "SIN|KUL",
         "dep_date": "2026-08-01",
+        "return_date": "",
+        "flight_type": "ONE_WAY",
         "origin": "SIN",
         "destination": "KUL",
         "flights": [{"price": 100}],

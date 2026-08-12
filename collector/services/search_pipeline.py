@@ -15,10 +15,12 @@ from collector.errors import (
     ProviderRateLimitedError,
     ProviderTimeoutError,
 )
+from collector.models.flight_type import FlightType
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
 from collector.proxy import ProxyRotator
 from collector.repository import SearchRepository
+from collector.routes import RouteCatalog
 from collector.services.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,7 @@ class BulkSearchPipeline:
         origin: Airport,
         dest: Airport,
         departure: str,
+        return_date: str | None,
         session: AsyncSession,
     ) -> AttemptResult:
         proxy_info = await self.rotator.get_proxy()
@@ -79,6 +82,7 @@ class BulkSearchPipeline:
                 currency=self.currency,
                 proxy_url=proxy_url,
                 session=session,
+                return_date=return_date,
             )
             await self.rate_limiter.report_success()
             if not flights:
@@ -86,6 +90,7 @@ class BulkSearchPipeline:
             return AttemptResult(flights, None, proxy_info)
         except ProviderRateLimitedError:
             await self.rate_limiter.report_429()
+            await self.rotator.report_rate_limited(proxy_info)
             return AttemptResult(None, ErrorType.RATE_LIMITED, proxy_info)
         except ProviderTimeoutError:
             return AttemptResult(None, ErrorType.TIMEOUT, proxy_info)
@@ -110,6 +115,8 @@ class BulkSearchPipeline:
         origin: Airport,
         dest: Airport,
         departure: str,
+        return_date: str | None,
+        flight_type: str,
         session: AsyncSession,
         retry_round: int = 0,
     ):
@@ -117,7 +124,9 @@ class BulkSearchPipeline:
         error_type: str | None = None
 
         for attempt in range(_MAX_ATTEMPTS):
-            result = await self._attempt_once(provider, origin, dest, departure, session)
+            result = await self._attempt_once(
+                provider, origin, dest, departure, return_date, session
+            )
             error_type = result.error_type
             if error_type in (ErrorType.TIMEOUT, ErrorType.CONNECTION, ErrorType.OTHER):
                 await self.rotator.report_failure(result.proxy_info)
@@ -126,6 +135,8 @@ class BulkSearchPipeline:
                     origin,
                     dest,
                     departure,
+                    return_date,
+                    flight_type,
                     flights=result.flights,
                     error_type=None,
                     retries=attempt,
@@ -148,6 +159,8 @@ class BulkSearchPipeline:
             origin,
             dest,
             departure,
+            return_date,
+            flight_type,
             flights=[],
             error_type=error_type,
             retries=retry_round,
@@ -160,6 +173,8 @@ class BulkSearchPipeline:
         origin: Airport,
         dest: Airport,
         departure: str,
+        return_date: str | None,
+        flight_type: str,
         flights: list[dict] | None,
         error_type: str | None,
         retries: int,
@@ -169,6 +184,8 @@ class BulkSearchPipeline:
         await self.repo.upsert(
             route=_route_key(origin, dest),
             dep_date=departure,
+            return_date=return_date or "",
+            flight_type=flight_type,
             origin=origin.value,
             destination=dest.value,
             flights=flights,
@@ -180,7 +197,7 @@ class BulkSearchPipeline:
 
     async def _run_batch(
         self,
-        tasks: list[tuple[BaseProvider, Airport, Airport, str]],
+        tasks: list[tuple[BaseProvider, Airport, Airport, str, str | None, str]],
         desc: str,
         retry_round: int = 0,
     ):
@@ -192,7 +209,14 @@ class BulkSearchPipeline:
             async with AsyncSession() as session:
                 while True:
                     try:
-                        provider, origin, dest, departure = queue.get_nowait()
+                        (
+                            provider,
+                            origin,
+                            dest,
+                            departure,
+                            return_date,
+                            flight_type,
+                        ) = queue.get_nowait()
                     except asyncio.QueueEmpty:
                         return
                     try:
@@ -201,6 +225,8 @@ class BulkSearchPipeline:
                             origin,
                             dest,
                             departure,
+                            return_date,
+                            flight_type,
                             session,
                             retry_round=retry_round,
                         )
@@ -213,7 +239,12 @@ class BulkSearchPipeline:
                             e,
                         )
                         await self._record_failure(
-                            origin, dest, departure, retry_round
+                            origin,
+                            dest,
+                            departure,
+                            return_date,
+                            flight_type,
+                            retry_round,
                         )
                     finally:
                         pbar.update(1)
@@ -228,6 +259,8 @@ class BulkSearchPipeline:
         origin: Airport,
         dest: Airport,
         departure: str,
+        return_date: str | None,
+        flight_type: str,
         retry_round: int,
     ):
         try:
@@ -235,6 +268,8 @@ class BulkSearchPipeline:
                 origin,
                 dest,
                 departure,
+                return_date,
+                flight_type,
                 flights=[],
                 error_type=ErrorType.OTHER,
                 retries=retry_round,
@@ -242,16 +277,24 @@ class BulkSearchPipeline:
                 searched_at=datetime.now(timezone.utc).isoformat(),
             )
         except Exception:
-            logger.exception("Failed to record failed task %s->%s on %s",
-                             origin.value, dest.value, departure)
+            logger.exception(
+                "Failed to record failed task %s->%s on %s",
+                origin.value,
+                dest.value,
+                departure,
+            )
 
     async def _get_provider_map(
         self,
     ) -> dict[str, tuple[BaseProvider, Airport, Airport]]:
         m: dict[str, tuple[BaseProvider, Airport, Airport]] = {}
         for p in self.providers:
-            for o, d in p.routes:
-                m[_route_key(o, d)] = (p, o, d)
+            for r in RouteCatalog.one_way_routes():
+                if p.supports is not None and (r.origin, r.dest) not in p.supports:
+                    continue
+                origin = RouteCatalog.resolve(r.origin)
+                dest = RouteCatalog.resolve(r.dest)
+                m[_route_key(origin, dest)] = (p, origin, dest)
         return m
 
     async def _retry_loop(self, rounds: int = 3):
@@ -269,11 +312,15 @@ class BulkSearchPipeline:
                 )
                 await self.rotator.refresh(force=True)
 
-            retry_tasks: list[tuple[BaseProvider, Airport, Airport, str]] = []
-            for route, dep_date in failed:
+            retry_tasks: list[
+                tuple[BaseProvider, Airport, Airport, str, str | None, str]
+            ] = []
+            for route, dep_date, return_date, flight_type in failed:
                 if route in provider_map:
                     provider, origin, dest = provider_map[route]
-                    retry_tasks.append((provider, origin, dest, dep_date))
+                    retry_tasks.append(
+                        (provider, origin, dest, dep_date, return_date, flight_type)
+                    )
 
             if retry_tasks:
                 logger.info(
@@ -294,6 +341,87 @@ class BulkSearchPipeline:
         if by_error:
             logger.warning("Failed breakdown: %s", dict(by_error))
 
+    async def _build_tasks(
+        self,
+        start_date: date,
+        effective_end: date,
+    ) -> tuple[
+        list[tuple[BaseProvider, Airport, Airport, str, str | None, str]],
+        list[tuple[str, str, str, str, str, str]],
+    ]:
+        tasks: list[tuple[BaseProvider, Airport, Airport, str, str | None, str]] = []
+        seed_rows: list[tuple[str, str, str, str, str, str]] = []
+
+        def supports(provider: BaseProvider, origin: str, dest: str) -> bool:
+            return provider.supports is None or (origin, dest) in provider.supports
+
+        for provider in self.providers:
+            for r in RouteCatalog.one_way_routes():
+                if not supports(provider, r.origin, r.dest):
+                    continue
+                origin = RouteCatalog.resolve(r.origin)
+                dest = RouteCatalog.resolve(r.dest)
+                route = _route_key(origin, dest)
+                current = start_date
+                while current <= effective_end:
+                    ds = current.isoformat()
+                    tasks.append(
+                        (
+                            provider,
+                            origin,
+                            dest,
+                            ds,
+                            None,
+                            FlightType.ONE_WAY.value,
+                        )
+                    )
+                    seed_rows.append(
+                        (
+                            route,
+                            ds,
+                            "",
+                            FlightType.ONE_WAY.value,
+                            origin.value,
+                            dest.value,
+                        )
+                    )
+                    current += timedelta(days=1)
+
+            for r in RouteCatalog.round_trip_routes():
+                if not supports(provider, r.origin, r.dest):
+                    continue
+                origin = RouteCatalog.resolve(r.origin)
+                dest = RouteCatalog.resolve(r.dest)
+                route = _route_key(origin, dest)
+                for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
+                    current = start_date
+                    while current <= effective_end:
+                        ds = current.isoformat()
+                        return_date = (current + timedelta(days=offset)).isoformat()
+                        tasks.append(
+                            (
+                                provider,
+                                origin,
+                                dest,
+                                ds,
+                                return_date,
+                                FlightType.ROUND_TRIP.value,
+                            )
+                        )
+                        seed_rows.append(
+                            (
+                                route,
+                                ds,
+                                return_date,
+                                FlightType.ROUND_TRIP.value,
+                                origin.value,
+                                dest.value,
+                            )
+                        )
+                        current += timedelta(days=1)
+
+        return tasks, seed_rows
+
     async def run(
         self,
         start_date: date,
@@ -303,17 +431,7 @@ class BulkSearchPipeline:
         cutoff = date.today() + timedelta(days=max_days_ahead)
         effective_end = min(end_date, cutoff)
 
-        tasks: list[tuple[BaseProvider, Airport, Airport, str]] = []
-        seed_rows: list[tuple[str, str, str, str]] = []
-        for provider in self.providers:
-            for origin, dest in provider.routes:
-                current = start_date
-                while current <= effective_end:
-                    ds = current.isoformat()
-                    route = _route_key(origin, dest)
-                    tasks.append((provider, origin, dest, ds))
-                    seed_rows.append((route, ds, origin.value, dest.value))
-                    current += timedelta(days=1)
+        tasks, seed_rows = await self._build_tasks(start_date, effective_end)
 
         logger.info(
             "Total tasks: %d across %d provider(s)", len(tasks), len(self.providers)

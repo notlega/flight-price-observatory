@@ -10,8 +10,8 @@ class BaseProvider(ABC):
     name: str = "base"
 
     @property
-    @abstractmethod
-    def routes(self) -> list[tuple[Airport, Airport]]: ...
+    def supports(self) -> set[tuple[str, str]] | None:
+        return None
 
     @staticmethod
     def _require_proxy(proxy_url: str | None) -> None:
@@ -29,4 +29,5 @@ class BaseProvider(ABC):
         currency: str = "SGD",
         proxy_url: str | None = None,
         session: AsyncSession | None = None,
+        return_date: str | None = None,
     ) -> list[dict] | None: ...

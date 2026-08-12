@@ -191,7 +191,7 @@ uv run ruff check .
 - [x] Provider abstraction layer
 - [x] Automated data collection with proxy rotation
 - [x] SQLite intermediary + retry loop
-- [x] Google Flights provider (9 SIN->Asia routes)
+- [x] Google Flights provider (13 SIN<->Asia routes)
 - [ ] Adaptive collection schedule (daily 0-30d, weekly 31-90d, etc.)
 - [ ] R2 upload with gzip compression
 - [ ] Bronze->silver Parquet transformation

@@ -11,6 +11,7 @@ from collector.errors import (
     ProviderRateLimitedError,
     ProviderTimeoutError,
 )
+from collector.models import FlightType
 from collector.services.search_pipeline import BulkSearchPipeline
 
 from tests.libs.factories import make_flights, make_proxy
@@ -69,7 +70,9 @@ async def test_attempt_once_success():
         provider=FakeProvider(script=[make_flights(100)]),
         rotator=FakeRotator(proxies=[proxy]),
     )
-    result = await pipeline._attempt_once(pipeline.providers[0], SIN, KUL, DEP, AsyncMock())
+    result = await pipeline._attempt_once(
+        pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
+    )
     assert result.error_type is None
     assert result.flights == make_flights(100)
     assert result.proxy_info is proxy
@@ -81,7 +84,7 @@ async def test_attempt_once_empty_result_is_data_error():
         rotator=FakeRotator(proxies=[make_proxy()]),
     )
     result = await pipeline._attempt_once(
-        pipeline.providers[0], SIN, KUL, DEP, AsyncMock()
+        pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
     )
     assert result.error_type == ErrorType.DATA
     assert result.flights is None
@@ -92,7 +95,7 @@ async def test_attempt_once_no_proxy():
     pipeline = _make_pipeline(rotator=FakeRotator(proxies=[]))
     with patch("collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()):
         result = await pipeline._attempt_once(
-            pipeline.providers[0], SIN, KUL, DEP, AsyncMock()
+            pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
         )
     assert result.error_type == ErrorType.NO_PROXY
     assert result.proxy_info is None
@@ -104,7 +107,7 @@ async def test_attempt_once_empty_list_is_data_error():
         rotator=FakeRotator(proxies=[make_proxy()]),
     )
     result = await pipeline._attempt_once(
-        pipeline.providers[0], SIN, KUL, DEP, AsyncMock()
+        pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
     )
     assert result.error_type == ErrorType.DATA
 
@@ -121,7 +124,9 @@ async def test_attempt_once_empty_list_is_data_error():
 )
 async def test_attempt_once_error_mapping(exc, expected):
     pipeline = _make_pipeline(provider=FakeProvider(script=[exc]))
-    result = await pipeline._attempt_once(pipeline.providers[0], SIN, KUL, DEP, AsyncMock())
+    result = await pipeline._attempt_once(
+        pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
+    )
     assert result.error_type == expected
     assert result.proxy_info is not None
 
@@ -130,14 +135,25 @@ async def test_attempt_once_429_reports_rate_limiter():
     pipeline = _make_pipeline(
         provider=FakeProvider(script=[ProviderRateLimitedError("429")])
     )
-    with patch.object(
-        pipeline.rate_limiter, "report_429", new=AsyncMock()
-    ) as report:
+    with patch.object(pipeline.rate_limiter, "report_429", new=AsyncMock()) as report:
         result = await pipeline._attempt_once(
-            pipeline.providers[0], SIN, KUL, DEP, AsyncMock()
+            pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
         )
     assert result.error_type == ErrorType.RATE_LIMITED
     report.assert_awaited_once()
+
+
+async def test_attempt_once_429_parks_proxy():
+    proxy = make_proxy()
+    pipeline = _make_pipeline(
+        provider=FakeProvider(script=[ProviderRateLimitedError("429")]),
+        rotator=FakeRotator(proxies=[proxy]),
+    )
+    result = await pipeline._attempt_once(
+        pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
+    )
+    assert result.error_type == ErrorType.RATE_LIMITED
+    assert pipeline.rotator.rate_limited == [(proxy, 60)]
 
 
 async def test_search_and_store_success_stores_once():
@@ -146,7 +162,15 @@ async def test_search_and_store_success_stores_once():
         provider=FakeProvider(script=[make_flights(100)]),
         rotator=FakeRotator(proxies=[proxy]),
     )
-    await pipeline._search_and_store(pipeline.providers[0], SIN, KUL, DEP, AsyncMock())
+    await pipeline._search_and_store(
+        pipeline.providers[0],
+        SIN,
+        KUL,
+        DEP,
+        None,
+        FlightType.ONE_WAY.value,
+        AsyncMock(),
+    )
     assert len(pipeline.repo.upserts) == 1
     row = pipeline.repo.upserts[0]
     assert row["success"] is True
@@ -158,10 +182,22 @@ async def test_search_and_store_success_stores_once():
 async def test_search_and_store_retries_then_succeeds():
     pipeline = _make_pipeline(
         provider=FakeProvider(
-            script=[ProviderTimeoutError("t"), ProviderTimeoutError("t"), make_flights(100)]
+            script=[
+                ProviderTimeoutError("t"),
+                ProviderTimeoutError("t"),
+                make_flights(100),
+            ]
         )
     )
-    await pipeline._search_and_store(pipeline.providers[0], SIN, KUL, DEP, AsyncMock())
+    await pipeline._search_and_store(
+        pipeline.providers[0],
+        SIN,
+        KUL,
+        DEP,
+        None,
+        FlightType.ONE_WAY.value,
+        AsyncMock(),
+    )
     assert len(pipeline.repo.upserts) == 1
     row = pipeline.repo.upserts[0]
     assert row["success"] is True
@@ -173,7 +209,15 @@ async def test_search_and_store_all_fail_stores_failure():
     pipeline = _make_pipeline(
         provider=FakeProvider(script=[ProviderConnectionError("c")] * 3)
     )
-    await pipeline._search_and_store(pipeline.providers[0], SIN, KUL, DEP, AsyncMock())
+    await pipeline._search_and_store(
+        pipeline.providers[0],
+        SIN,
+        KUL,
+        DEP,
+        None,
+        FlightType.ONE_WAY.value,
+        AsyncMock(),
+    )
     assert len(pipeline.repo.upserts) == 1
     row = pipeline.repo.upserts[0]
     assert row["success"] is False
@@ -185,7 +229,15 @@ async def test_data_error_not_reported_to_rotator():
     pipeline = _make_pipeline(
         provider=FakeProvider(script=[ProviderDataError("d")] * 3)
     )
-    await pipeline._search_and_store(pipeline.providers[0], SIN, KUL, DEP, AsyncMock())
+    await pipeline._search_and_store(
+        pipeline.providers[0],
+        SIN,
+        KUL,
+        DEP,
+        None,
+        FlightType.ONE_WAY.value,
+        AsyncMock(),
+    )
     assert pipeline.rotator.failures == []
     assert pipeline.repo.upserts[0]["error_type"] == ErrorType.DATA
 
@@ -208,7 +260,9 @@ async def test_run_batch_records_unexpected_failure():
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
         patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
     ):
-        await pipeline._run_batch([(provider, SIN, KUL, DEP)], "test")
+        await pipeline._run_batch(
+            [(provider, SIN, KUL, DEP, None, FlightType.ONE_WAY.value)], "test"
+        )
     assert pipeline.repo.upserts[-1]["error_type"] == ErrorType.OTHER
     assert pipeline.repo.upserts[-1]["success"] is False
 
@@ -217,7 +271,7 @@ async def test_retry_loop_refreshes_when_pool_low():
     provider = FakeProvider(script=[make_flights(100)])
     rotator = FakeRotator(proxies=[make_proxy()], working=0)
     repo = FakeRepo()
-    repo.failed = [(ROUTE, DEP)]
+    repo.failed = [(ROUTE, DEP, "", "ONE_WAY")]
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
@@ -238,7 +292,7 @@ async def test_retry_loop_stops_when_nothing_failed():
 async def test_retry_loop_recovers_no_proxy_and_data(error_type):
     provider = FakeProvider(script=[make_flights(100)])
     repo = FakeRepo()
-    repo.failed = [(ROUTE, DEP)]
+    repo.failed = [(ROUTE, DEP, "", "ONE_WAY")]
     repo.upserts = [{"error_type": error_type, "success": False}]
     pipeline = _make_pipeline(provider=provider, repo=repo)
     with (
@@ -250,7 +304,7 @@ async def test_retry_loop_recovers_no_proxy_and_data(error_type):
 
 
 async def test_run_orchestrates_end_to_end(tmp_path):
-    provider = FakeProvider(script=[make_flights(100)])
+    provider = FakeProvider(script=[make_flights(100)] * 4)
     rotator = FakeRotator(proxies=[make_proxy()], working=1)
     repo = FakeRepo()
     repo.success_count = 1
@@ -264,11 +318,27 @@ async def test_run_orchestrates_end_to_end(tmp_path):
     ):
         await pipeline.run(date(2026, 8, 1), date(2026, 8, 1), max_days_ahead=330)
 
-    assert repo.inserted == [(ROUTE, DEP, SIN.value, KUL.value)]
+    assert repo.inserted == [
+        (ROUTE, DEP, "", "ONE_WAY", SIN.value, KUL.value),
+        (ROUTE, DEP, "2026-08-08", "ROUND_TRIP", SIN.value, KUL.value),
+        (ROUTE, DEP, "2026-08-15", "ROUND_TRIP", SIN.value, KUL.value),
+        (ROUTE, DEP, "2026-08-22", "ROUND_TRIP", SIN.value, KUL.value),
+    ]
     assert rotator.refreshes == [(False, None)]
-    assert repo.upserts[-1]["success"] is True
+    assert all(r["success"] is True for r in repo.upserts)
     convert.assert_awaited_once_with(
         str(tmp_path / "state.db"),
         ANY,
         delete=True,
     )
+
+
+def test_ahead_days_from_today_matches_window():
+    from datetime import timedelta
+
+    from cli.search import _ahead_days
+
+    today = date.today()
+    assert _ahead_days(today, today + timedelta(days=2)) == 2
+    assert _ahead_days(today + timedelta(days=10), today + timedelta(days=12)) == 12
+    assert _ahead_days(today - timedelta(days=5), today - timedelta(days=3)) == 0

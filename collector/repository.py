@@ -14,6 +14,8 @@ _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS search_results (
     route       TEXT NOT NULL,
     dep_date    TEXT NOT NULL,
+    return_date TEXT NOT NULL DEFAULT '',
+    flight_type TEXT NOT NULL,
     origin      TEXT NOT NULL,
     destination TEXT NOT NULL,
     flights     TEXT,
@@ -21,14 +23,14 @@ CREATE TABLE IF NOT EXISTS search_results (
     retries     INTEGER DEFAULT 0,
     success     BOOL DEFAULT 0,
     searched_at TEXT,
-    PRIMARY KEY (route, dep_date)
+    PRIMARY KEY (route, dep_date, return_date, flight_type)
 )
 """
 
 _INSERT_SQL = """
 INSERT OR REPLACE INTO search_results
-    (route, dep_date, origin, destination, flights, error_type, retries, success, searched_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (route, dep_date, return_date, flight_type, origin, destination, flights, error_type, retries, success, searched_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 _RETRY_ERROR_TYPES = (
@@ -60,10 +62,17 @@ class SearchRepository:
         self._conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA busy_timeout=10000")
+        await self._migrate()
         await self._conn.execute(_CREATE_SQL)
         await self._conn.commit()
         self._write_queue = asyncio.Queue()
         self._writer_task = asyncio.create_task(self._writer_loop())
+
+    async def _migrate(self):
+        cursor = await self._conn.execute("PRAGMA table_info(search_results)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if columns and "return_date" not in columns:
+            await self._conn.execute("DROP TABLE search_results")
 
     async def _writer_loop(self):
         batch: list[tuple] = []
@@ -110,6 +119,8 @@ class SearchRepository:
         self,
         route: str,
         dep_date: str,
+        return_date: str,
+        flight_type: str,
         origin: str,
         destination: str,
         flights: list[dict] | None,
@@ -123,6 +134,8 @@ class SearchRepository:
             (
                 route,
                 dep_date,
+                return_date,
+                flight_type,
                 origin,
                 destination,
                 flights_json,
@@ -133,26 +146,26 @@ class SearchRepository:
             )
         )
 
-    async def insert_ignore_all(self, tasks: list[tuple[str, str, str, str]]):
+    async def insert_ignore_all(self, tasks: list[tuple[str, str, str, str, str, str]]):
         sql = (
             "INSERT OR IGNORE INTO search_results "
-            "(route, dep_date, origin, destination, retries, success) "
-            "VALUES (?, ?, ?, ?, 0, 0)"
+            "(route, dep_date, return_date, flight_type, origin, destination, retries, success) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, 0)"
         )
         async with self._write_lock:
             await self._conn.executemany(sql, tasks)
             await self._conn.commit()
 
-    async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str]]:
+    async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
         placeholders = ",".join("?" for _ in _RETRY_ERROR_TYPES)
         cursor = await self._conn.execute(
-            "SELECT route, dep_date "
+            "SELECT route, dep_date, return_date, flight_type "
             f"FROM search_results WHERE success = 0 "
             f"AND error_type IN ({placeholders}) AND retries < ?",
             (*_RETRY_ERROR_TYPES, max_retries),
         )
         rows = await cursor.fetchall()
-        return [(r[0], r[1]) for r in rows]
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     async def count_status(self) -> tuple[int, int]:
         cursor = await self._conn.execute(
@@ -180,11 +193,12 @@ class SearchRepository:
 
     async def _iter_successful(self, raw: bool) -> AsyncIterator[dict]:
         cursor = await self._conn.execute(
-            "SELECT route, dep_date, origin, destination, flights, searched_at "
+            "SELECT route, dep_date, return_date, flight_type, origin, "
+            "destination, flights, searched_at "
             "FROM search_results WHERE success = 1 ORDER BY route, dep_date"
         )
         async for row in cursor:
-            flights = row[4]
+            flights = row[6]
             if raw:
                 flights = flights or "[]"
             else:
@@ -192,10 +206,12 @@ class SearchRepository:
             yield {
                 "route": row[0],
                 "dep_date": row[1],
-                "origin": row[2],
-                "destination": row[3],
+                "return_date": row[2],
+                "flight_type": row[3],
+                "origin": row[4],
+                "destination": row[5],
                 "flights": flights,
-                "searched_at": row[5],
+                "searched_at": row[7],
             }
 
     async def iter_successful(self) -> AsyncIterator[dict]:
