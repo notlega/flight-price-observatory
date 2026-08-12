@@ -17,11 +17,11 @@ class FakeProvider(BaseProvider):
     def __init__(
         self,
         supports: set[tuple[str, str]] | None = None,
-        script: list = None,
+        script: list | None = None,
     ):
         self._supports = supports or {("SIN", "KUL")}
         self.script = list(script or [])
-        self.calls: list[tuple[Airport, Airport, str, str | None]] = []
+        self.calls: list[tuple[Airport, Airport, str, str | None, str | None]] = []
 
     @property
     def supports(self) -> set[tuple[str, str]] | None:

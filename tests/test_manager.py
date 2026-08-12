@@ -2,16 +2,30 @@ from datetime import date
 from unittest.mock import AsyncMock, patch
 
 from collector.manager import CollectorManager
+from collector.providers.base import BaseProvider
+from collector.registry import ProviderRegistry
 
 from tests.libs.fakes import FakeProvider
 
 
-class _EmptyRegistry:
-    providers = {}
+class _EmptyRegistry(ProviderRegistry):
+    def __init__(self):
+        super().__init__()
+        self.__providers = {}
+
+    @property
+    def providers(self) -> dict[str, type[BaseProvider]]:
+        return dict(self.__providers)
 
 
-class _Registry:
-    providers = {"fake": FakeProvider}
+class _Registry(ProviderRegistry):
+    def __init__(self):
+        super().__init__()
+        self.__providers = {"fake": FakeProvider}
+
+    @property
+    def providers(self) -> dict[str, type[BaseProvider]]:
+        return dict(self.__providers)
 
 
 async def test_run_no_providers_is_noop():

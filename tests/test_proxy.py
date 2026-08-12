@@ -53,13 +53,15 @@ def test_proxy_roundtrip_preserves_last_validated():
 
 async def test_validate_proxy_scores_reflect_latency():
     with patch("collector.proxy._test_http_echo", return_value=100.0):
-        fast = await _validate_proxy(make_proxy(url="http://f:1"), None)
+        fast = await _validate_proxy(make_proxy(url="http://f:1"), AsyncMock())
     with patch("collector.proxy._test_http_echo", return_value=700.0):
-        slow = await _validate_proxy(make_proxy(url="http://s:1"), None)
+        slow = await _validate_proxy(make_proxy(url="http://s:1"), AsyncMock())
     with patch("collector.proxy._test_http_echo", return_value=0.0):
-        dead = await _validate_proxy(make_proxy(url="http://d:1"), None)
+        dead = await _validate_proxy(make_proxy(url="http://d:1"), AsyncMock())
 
+    assert fast is not None
     assert fast.quality_score == 1.3
+    assert slow is not None
     assert slow.quality_score == 1.1
     assert dead is None
 
@@ -224,7 +226,9 @@ async def test_save_load_cache_roundtrip(tmp_path):
     with patch("collector.proxy._PROXY_CACHE_PATH", str(path)):
         p = make_proxy(url="http://a:1", quality_score=1.2, last_validated=42.0)
         _save_cache([p])
-        cached_at, proxies = _load_cache()
+        loaded = _load_cache()
+        assert loaded is not None
+        cached_at, proxies = loaded
     assert proxies[0].url == p.url
     assert proxies[0].quality_score == 1.2
     assert proxies[0].last_validated == 42.0
@@ -297,7 +301,11 @@ async def test_rotator_weights_favor_high_quality():
         make_proxy(url="http://slow:1", quality_score=0.1),
     ]
     rot._recompute_weights()
-    picks = [await rot.get_proxy() for _ in range(200)]
+    picks: list[ProxyInfo] = []
+    for _ in range(200):
+        p = await rot.get_proxy()
+        assert p is not None
+        picks.append(p)
     fast = sum(1 for p in picks if p.url == "http://fast:1")
     assert fast > 150
 
@@ -311,7 +319,11 @@ async def test_report_rate_limited_parks_proxy_and_skips_it():
     victim = rot._proxies[0]
     await rot.report_rate_limited(victim, seconds=60)
 
-    picks = [await rot.get_proxy() for _ in range(30)]
+    picks: list[ProxyInfo] = []
+    for _ in range(30):
+        p = await rot.get_proxy()
+        assert p is not None
+        picks.append(p)
     assert all(p.url != "http://a:1" for p in picks)
     assert rot.working_count() == 2
     assert "http://b:2" in {p.url for p in picks}

@@ -1,17 +1,18 @@
 from collector.registry import ProviderRegistry
+from tests.libs.fakes import FakeProvider
 
 
 def test_providers_returns_copy():
     r = ProviderRegistry()
     providers = r.providers
-    providers["bogus"] = object()
+    providers["bogus"] = FakeProvider
     assert "bogus" not in r.providers
 
 
 def test_register_and_unregister():
     r = ProviderRegistry()
-    r.register("custom", dict)
-    assert r.providers["custom"] is dict
+    r.register("custom", FakeProvider)
+    assert r.providers["custom"] is FakeProvider
     r.unregister("custom")
     assert "custom" not in r.providers
 

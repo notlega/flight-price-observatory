@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
@@ -59,9 +60,9 @@ def _make_pipeline(provider=None, rotator=None, repo=None, **kwargs):
         rate=1000,
         **kwargs,
     )
-    pipeline.rotator = rotator or FakeRotator(proxies=[make_proxy()])
-    pipeline.repo = repo or FakeRepo()
-    return pipeline
+    pipeline.rotator = cast(Any, rotator or FakeRotator(proxies=[make_proxy()]))
+    pipeline.repo = cast(Any, repo or FakeRepo())
+    return cast(Any, pipeline)
 
 
 async def test_attempt_once_success():

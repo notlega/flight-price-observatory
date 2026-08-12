@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any, cast
 
 from unittest.mock import patch
 
@@ -32,25 +33,25 @@ def test_rt_expand_top_n_defaults_to_three():
 
 
 def test_fli_airport_patch_resolves_extra_codes():
-    assert _fli_decoders._AIRPORT_BY_CODE["YIC"] is Airport.YIC
-    assert _fli_decoders._AIRPORT_BY_CODE["OKA"] is Airport.NAH
-    assert _fli_decoders._parse_airport("YIC") is Airport.YIC
-    assert _fli_decoders._parse_airport("OKA") is Airport.NAH
+    assert _fli_decoders._AIRPORT_BY_CODE["YIC"] is Airport["YIC"]
+    assert _fli_decoders._AIRPORT_BY_CODE["OKA"] is Airport["NAH"]
+    assert _fli_decoders._parse_airport("YIC") is Airport["YIC"]
+    assert _fli_decoders._parse_airport("OKA") is Airport["NAH"]
 
 
 def test_fli_airport_patch_is_idempotent():
-    member = Airport.YIC
+    member = Airport["YIC"]
     _patch_fli_airports()
-    assert Airport.YIC is member
+    assert Airport["YIC"] is member
     assert Airport._member_map_["YIC"] is member
 
 
 def test_extend_airport_enum_skips_existing_members():
     _extend_airport_enum(Airport, {"SIN": "Changi"})
-    assert Airport.SIN is Airport["SIN"]
+    assert Airport["SIN"] is Airport["SIN"]
 
 
-async def _search(session):
+async def _search(session: Any):
     return await _provider().search(
         SIN,
         KUL,
@@ -117,7 +118,9 @@ async def test_search_posts_with_proxy_and_returns_parsed_flights():
 
     assert result == [{"price": 100}, {"price": 200}]
     session.post.assert_awaited_once()
-    _, kwargs = session.post.await_args
+    await_args = session.post.await_args
+    assert await_args is not None
+    _, kwargs = await_args
     assert kwargs["proxies"] == {"all": PROXY}
     assert kwargs["data"].startswith("f.req=")
     assert not session.closed
@@ -169,7 +172,7 @@ async def test_search_returns_none_when_no_flights_parsed():
 async def test_search_requires_proxy():
     session = FakeSession()
     with pytest.raises(ProviderConnectionError):
-        await _provider().search(SIN, KUL, "2026-12-01", session=session)
+        await _provider().search(SIN, KUL, "2026-12-01", session=cast(Any, session))
 
 
 class _FakeLeg:
@@ -189,13 +192,13 @@ class _FakeFlight:
         self.legs = legs or []
         self.booking_token = token
 
-    def model_copy(self, update=None):
+    def model_copy(self, update: dict | None = None):
         return _FakeFlight(
-            price=update.get("price", self.price),
-            duration=update.get("duration", self.duration),
-            stops=update.get("stops", self.stops),
-            legs=update.get("legs", self.legs),
-            token=update.get("booking_token", self.booking_token),
+            price=(update or {}).get("price", self.price),
+            duration=(update or {}).get("duration", self.duration),
+            stops=(update or {}).get("stops", self.stops),
+            legs=(update or {}).get("legs", self.legs),
+            token=(update or {}).get("booking_token", self.booking_token),
         )
 
     def model_dump(self, mode="json"):
@@ -242,10 +245,11 @@ async def test_search_round_trip_expands_return_leg():
             "2026-12-01",
             currency="SGD",
             proxy_url=PROXY,
-            session=session,
+            session=cast(Any, session),
             return_date="2026-12-08",
         )
 
+    assert result is not None
     assert len(result) == 1
     combo = result[0]
     assert combo["price"] == 130
