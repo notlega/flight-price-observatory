@@ -171,6 +171,7 @@ class GoogleFlightsProvider(BaseProvider):
         return_date: str | None = None,
     ) -> list[dict] | None:
         self._require_proxy(proxy_url)
+        assert proxy_url is not None
 
         filters = self._build_filters(origin, dest, date_str, return_date)
 

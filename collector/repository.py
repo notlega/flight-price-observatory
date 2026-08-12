@@ -55,45 +55,56 @@ class SearchRepository:
         self._writer_task: asyncio.Task | None = None
         self._write_lock = asyncio.Lock()
 
+    @property
+    def _c(self) -> aiosqlite.Connection:
+        assert self._conn is not None, "repository connection not open"
+        return self._conn
+
+    @property
+    def _q(self) -> asyncio.Queue:
+        assert self._write_queue is not None, "writer queue not started"
+        return self._write_queue
+
     async def open(self):
         db_dir = os.path.dirname(self._db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
-        self._conn = await aiosqlite.connect(self._db_path, isolation_level=None)
-        await self._conn.execute("PRAGMA journal_mode=WAL")
-        await self._conn.execute("PRAGMA busy_timeout=10000")
+        conn = await aiosqlite.connect(self._db_path, isolation_level=None)
+        self._conn = conn
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA busy_timeout=10000")
         await self._migrate()
-        await self._conn.execute(_CREATE_SQL)
-        await self._conn.commit()
+        await conn.execute(_CREATE_SQL)
+        await conn.commit()
         self._write_queue = asyncio.Queue()
         self._writer_task = asyncio.create_task(self._writer_loop())
 
     async def _migrate(self):
-        cursor = await self._conn.execute("PRAGMA table_info(search_results)")
+        cursor = await self._c.execute("PRAGMA table_info(search_results)")
         columns = {row[1] for row in await cursor.fetchall()}
         if columns and "return_date" not in columns:
-            await self._conn.execute("DROP TABLE search_results")
+            await self._c.execute("DROP TABLE search_results")
 
     async def _writer_loop(self):
         batch: list[tuple] = []
         while True:
-            item = await self._write_queue.get()
-            self._write_queue.task_done()
+            item = await self._q.get()
+            self._q.task_done()
             if item is _STOP:
                 if batch:
-                    await self._conn.executemany(_INSERT_SQL, batch)
-                    await self._conn.commit()
+                    await self._c.executemany(_INSERT_SQL, batch)
+                    await self._c.commit()
                 return
             if item is _FLUSH:
                 if batch:
-                    await self._conn.executemany(_INSERT_SQL, batch)
-                    await self._conn.commit()
+                    await self._c.executemany(_INSERT_SQL, batch)
+                    await self._c.commit()
                     batch.clear()
                 continue
             batch.append(item)
             if len(batch) >= _WRITE_BATCH_SIZE:
-                await self._conn.executemany(_INSERT_SQL, batch)
-                await self._conn.commit()
+                await self._c.executemany(_INSERT_SQL, batch)
+                await self._c.commit()
                 batch.clear()
 
     async def flush(self):
@@ -102,17 +113,18 @@ class SearchRepository:
             return
         async with self._write_lock:
             self._write_queue.put_nowait(_FLUSH)
-            await self._write_queue.join()
+            await self._q.join()
 
     async def close(self):
         if self._conn is None:
             return
         if self._write_queue is not None:
             self._write_queue.put_nowait(_STOP)
-            await self._writer_task
+            if self._writer_task is not None:
+                await self._writer_task
             self._write_queue = None
             self._writer_task = None
-        await self._conn.close()
+        await self._c.close()
         self._conn = None
 
     async def upsert(
@@ -130,7 +142,7 @@ class SearchRepository:
         searched_at: str,
     ):
         flights_json = json.dumps(flights) if flights else None
-        self._write_queue.put_nowait(
+        self._q.put_nowait(
             (
                 route,
                 dep_date,
@@ -153,12 +165,12 @@ class SearchRepository:
             "VALUES (?, ?, ?, ?, ?, ?, 0, 0)"
         )
         async with self._write_lock:
-            await self._conn.executemany(sql, tasks)
-            await self._conn.commit()
+            await self._c.executemany(sql, tasks)
+            await self._c.commit()
 
     async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
         placeholders = ",".join("?" for _ in _RETRY_ERROR_TYPES)
-        cursor = await self._conn.execute(
+        cursor = await self._c.execute(
             "SELECT route, dep_date, return_date, flight_type "
             f"FROM search_results WHERE success = 0 "
             f"AND error_type IN ({placeholders}) AND retries < ?",
@@ -168,7 +180,7 @@ class SearchRepository:
         return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     async def count_status(self) -> tuple[int, int]:
-        cursor = await self._conn.execute(
+        cursor = await self._c.execute(
             "SELECT "
             "COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0), "
             "COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) "
@@ -184,7 +196,7 @@ class SearchRepository:
         return (await self.count_status())[1]
 
     async def count_by_error(self) -> list[tuple[str, int]]:
-        cursor = await self._conn.execute(
+        cursor = await self._c.execute(
             "SELECT error_type, COUNT(*) FROM search_results "
             "WHERE success = 0 GROUP BY error_type"
         )
@@ -192,7 +204,7 @@ class SearchRepository:
         return [(r[0], r[1]) for r in rows]
 
     async def _iter_successful(self, raw: bool) -> AsyncIterator[dict]:
-        cursor = await self._conn.execute(
+        cursor = await self._c.execute(
             "SELECT route, dep_date, return_date, flight_type, origin, "
             "destination, flights, searched_at "
             "FROM search_results WHERE success = 1 ORDER BY route, dep_date"

@@ -128,7 +128,10 @@ class BulkSearchPipeline:
                 provider, origin, dest, departure, return_date, session
             )
             error_type = result.error_type
-            if error_type in (ErrorType.TIMEOUT, ErrorType.CONNECTION, ErrorType.OTHER):
+            if (
+                error_type in (ErrorType.TIMEOUT, ErrorType.CONNECTION, ErrorType.OTHER)
+                and result.proxy_info is not None
+            ):
                 await self.rotator.report_failure(result.proxy_info)
             if result.error_type is None:
                 await self._store_result(
