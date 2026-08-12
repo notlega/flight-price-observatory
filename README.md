@@ -1,6 +1,6 @@
 # Flight Price Observatory
 
-Auto-collect, store, analyse historical airfare data. SIN -> 9 Asian destinations. Build longitudinal dataset for trend analysis + ML.
+Auto-collect, store, analyse historical airfare data. SIN -> 13 Asian destinations. Build longitudinal dataset for trend analysis + ML.
 
 Unlike normal flight search (show current price), this snapshots prices over time -> spot patterns across booking windows, seasons, airlines, routes.
 
@@ -35,9 +35,9 @@ Unlike normal flight search (show current price), this snapshots prices over tim
 
 Six layers:
 
-**Scheduler.** GitHub Actions -- cron trigger, no manual intervention.
+**Scheduler.** (Planned) GitHub Actions cron trigger — no manual intervention.
 
-**Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT). Swap or add providers without touching pipeline.
+**Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK). Swap or add providers without touching pipeline.
 
 ```mermaid
 flowchart TD
@@ -48,8 +48,8 @@ flowchart TD
 
     CLI --> REG --> PROV --> PIPE
 
-    PIPE --> ROT["ProxyRotator<br/>3-phase validate TCP|HTTP|headers, tqdm, weighted select"]
-    PIPE --> RL["RateLimiter<br/>adaptive token bucket, halve on 429, double on clean 60s"]
+    PIPE --> ROT["ProxyRotator<br/>2-phase validate TCP|HTTP echo, tqdm, weighted select"]
+    PIPE --> RL["RateLimiter<br/>adaptive token bucket, halve on 429 burst, double on clean 60s"]
     PIPE --> SQL["SQLite aiosqlite<br/>upsert intermediary, track retries"]
     PIPE --> RETRY["Retry loop x3<br/>re-query 429s with fresh proxies"]
     PIPE --> CONV["Convert to JSONL<br/>write, delete SQLite DB"]
@@ -81,7 +81,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 | Progress        | tqdm              | CLI progress bars (proxy test, search, retry)|
 | Scheduler       | GitHub Actions    | Cron, no infra                              |
 | Package mgmt    | uv                | Fast, reproducible                          |
-| Testing         | pytest + ruff + coverage | CI quality gate, 84 tests, 92% cov |
+| Testing         | pytest + ruff + basedpyright + coverage | 110 tests, 91% cov |
 | Storage         | Cloudflare R2     | S3-compatible, free 10 GB, pay after        |
 | Query           | DuckDB            | SQL over Parquet, no server                 |
 | Viz             | Streamlit + Plotly| (Future) interactive dashboard              |
@@ -91,7 +91,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 ```
 flight-price-observatory/
 +-- .github/
-|   +-- workflows/          # CI: lint + test + coverage gate
+|   +-- workflows/          # (planned) CI: lint + test + coverage gate
 +-- cli/                    # CLI entry points (search, convert)
 +-- collector/              # core package: providers, services, models
 |   +-- providers/          #   one dir per flight data source (BaseProvider)
@@ -100,6 +100,8 @@ flight-price-observatory/
 +-- storage/                # runtime data (gitignored outputs)
 |   +-- raw/                #   final JSONL
 |   +-- db/                 #   transient SQLite state
+|   +-- logs/               #   run logs (gitignored)
+|   +-- proxy_cache.json    #   proxy pool cache (gitignored)
 +-- docs/                   # architecture, design, data model, ADRs
 +-- tests/                  # mirrors collector/ module structure
 |   +-- libs/               #   factories + fakes (shared test helpers)
@@ -164,7 +166,7 @@ uv run python -m cli convert --keep-db
 
 # Run tests + lint
 uv run pytest
-uv run ruff check .
+uv run lint
 ```
 
 `search` flags:
@@ -175,7 +177,7 @@ uv run ruff check .
 | `--max-days`| 330     | Days ahead from start |
 | `--currency`| SGD     | Currency code for pricing |
 | `--rate`    | 200     | Requests per second  |
-| `--workers` | 200     | Max concurrent searches |
+| `--workers` | 50     | Max concurrent searches |
 | `--verbose` | False   | Debug logging        |
 
 `convert` flags:

@@ -6,7 +6,7 @@ Six layers, one Python codebase.
 
 | Layer | Responsibility | Implementation |
 |-------|----------------|----------------|
-| Scheduler | Periodic trigger | GitHub Actions cron |
+| Scheduler | Periodic trigger | (planned) GitHub Actions cron |
 | Collection | Provider-agnostic search | `BulkSearchPipeline` |
 | Validation/transformation | Schema, dedup, normalise | `collector/convert.py` |
 | Data lake | Immutable raw tier | (future) R2 bronze |
@@ -57,15 +57,15 @@ flowchart TD
 Adaptive token bucket (`collector/services/rate_limiter.py`):
 
 - `acquire()` waits until `now - last_request >= 1/rate`.
-- `report_429()` halves the rate (min 0.5/s).
+- `report_429()` halves the rate (min 0.5/s) when a 429 burst exceeds 20% of the expected rate in a 30s window.
 - `report_success()` doubles it back, but only after a clean 60s window.
 
 ### Proxy rotation (`collector/proxy.py`)
 
-- 3-phase validation: TCP connect -> HTTP echo -> header checks (concurrent).
+- 2-phase validation: TCP prefilter -> HTTP echo latency (concurrent).
 - Quality score = f(latency), proxies weighted by score, dead ones removed.
-- Sources fetched from 16 list endpoints; results cached to `storage/proxy_cache.json` (TTL 30 min).
-- `refresh()` uses cache when present and fresh; fetches fresh when cache missing or all cached proxies dead.
+- Sources fetched from 27 list endpoints; results cached to `storage/proxy_cache.json` (fresh 15 min, revalidated up to 24 h).
+- `refresh()` uses cache when fresh; revalidates stale cache up to 24 h; fetches fresh when cache missing, expired, or all cached proxies dead.
 
 ## Persistence
 

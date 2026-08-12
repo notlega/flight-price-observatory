@@ -12,7 +12,7 @@
 ## Retry semantics
 
 - 3 retry rounds.
-- Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderConnectionError`, `no_proxy`.
+- Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderTimeoutError`, `ProviderConnectionError`, `no_proxy`.
 - `ProviderDataError` marks data bad; not worth retrying.
 - Failed routes rejected from retry once retry count >= 3, except 429 which is always re-queued to the next round.
 
@@ -23,10 +23,10 @@
 - **Factories:** `tests/libs/factories.py` — `make_proxy`, `make_flights` for data setup.
 - **Lifecycle:** `conftest.py` owns the opened repo fixture with teardown; tests never open/close manually.
 - **Determinism:** `pytest-randomly` shuffles order each run; `filterwarnings=error` fails on leaked resources; `--strict-markers` catches typo'd markers.
-- **Gate:** `fail_under = 80` coverage; current 92%.
+- **Gate:** `fail_under = 80` coverage; current 91%.
 
 ## Cost control
 
 - Single free tier infra: GitHub Actions cron, Cloudflare R2 (10 GB free).
 - Rate limiter guards Google Flights endpoint from 429-spiral; adaptive halving/doubling protects the provider.
-- Proxy cache (TTL 30 min) avoids re-fetching 27 sources every run.
+- Proxy cache (fresh 15 min) avoids re-fetching 27 sources every run.

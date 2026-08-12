@@ -2,12 +2,14 @@
 
 ## SQLite intermediary (`search_results`)
 
-Intermediary store for collected searches. Async writes, WAL journal, `INSERT OR REPLACE` keyed on `(route, dep_date)`.
+Intermediary store for collected searches. Async writes, WAL journal, `INSERT OR REPLACE` keyed on `(route, dep_date, return_date, flight_type)`.
 
 | Column      | Type   | Notes |
 |-------------|--------|-------|
 | `route`     | TEXT   | `"{origin}|{dest}"`, PK part |
 | `dep_date`  | TEXT   | `YYYY-MM-DD`, PK part |
+| `return_date`| TEXT  | `YYYY-MM-DD`, empty for one-way, PK part |
+| `flight_type`| TEXT  | `"ONE_WAY"` or `"ROUND_TRIP"`, PK part |
 | `origin`    | TEXT   | IATA code |
 | `destination`| TEXT  | IATA code |
 | `flights`   | TEXT   | JSON array of flight rows (serialized string) |
@@ -20,7 +22,7 @@ Semantics:
 
 - **Success row:** `success=1`, `flights` holds JSON. Absent if no flights found.
 - **Failure row:** `success=0`, `error_type` set, `retries` tracks attempts. Used by `get_failed(max_retries)` to feed retry loop.
-- **Retryable errors:** `rate_limited`, `timeout`, `connection` (see `_RETRY_ERROR_TYPES`). `data` errors are not retried; 429 never exhausts retries within a run.
+- **Retryable errors:** `rate_limited`, `timeout`, `connection`, `no_proxy` (see `_RETRY_ERROR_TYPES`). `data` errors are not retried; 429 never exhausts retries within a run.
 
 ## JSONL output (`storage/raw/search_*.jsonl`)
 
@@ -30,6 +32,8 @@ One line per successful route search:
 {
   "route": "SIN|KUL",
   "dep_date": "2026-08-01",
+  "return_date": "",
+  "flight_type": "ONE_WAY",
   "origin": "SIN",
   "destination": "KUL",
   "flights": "[{\"price\": 120, \"airline\": \"SQ\"}]",
@@ -46,4 +50,4 @@ Output of `GoogleFlightsProvider.search()`, from `fli` lib `parse_flight_row(...
 
 ## Proxy cache (`storage/proxy_cache.json`)
 
-Persisted `(timestamp, [ProxyInfo dicts])`. Each proxy: `url`, `protocol`, `quality_score`, `latency_ms`, `last_validated`. TTL 30 min; `refresh(force=True)` bypasses.
+Persisted `(timestamp, [ProxyInfo dicts])`. Each proxy: `url`, `protocol`, `quality_score`, `latency_ms`, `last_validated`. Fresh for 15 min, revalidated up to 24 h; `refresh(force=True)` bypasses.
