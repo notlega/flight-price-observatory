@@ -39,6 +39,8 @@ Six layers:
 
 **Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK). Swap or add providers without touching pipeline.
 
+**Routes.** `RouteCatalog` (`collector/routes.py`) defines 13 destinations out of SIN. Each date in the search window generates 26 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per route (return offsets 7, 14, 21 days) — up to 4 searches per route/date.
+
 ```mermaid
 flowchart TD
     CLI["python -m cli search --start YYYY-MM-DD --max-days 30"]

@@ -44,6 +44,13 @@ One line per successful route search:
 - `flights` remains a JSON **string** (raw fidelity, lossless round-trip through SQLite). Consumers parse it.
 - Produced by `collector/convert.py`, which deletes the SQLite DB afterwards by default.
 
+## Route catalog (`collector/routes.py`)
+
+- **Destinations:** KUL, CGK, BKK, HKT, DPS, MNL, SGN, HAN, NRT, KIX, HND, PVG, PEK (13).
+- **One-way:** every date in the search window x both directions (`RouteCatalog.one_way_routes()`) — 26 tasks/date.
+- **Round-trip:** `RouteCatalog.round_trip_routes()` (SIN->dest only), return offsets `ROUND_TRIP_OFFSETS = (7, 14, 21)` days — 3 extra tasks/route/date.
+- Encoded in `search_results` as `return_date` (empty = one-way) + `flight_type` (`ONE_WAY` / `ROUND_TRIP`).
+
 ## Flight row shape (Google Flights)
 
 Output of `GoogleFlightsProvider.search()`, from `fli` lib `parse_flight_row(...).model_dump(mode="json")`. Fields per the `fli` `Flight` model (price, airline, departure/arrival times, stops, etc.). Pipelines treat flight dicts as opaque JSON.
