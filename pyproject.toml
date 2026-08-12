@@ -10,8 +10,20 @@ dependencies = [
     "aiosqlite>=0.21.0",
 ]
 
+[project.scripts]
+lint = "collector._lint:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "collector"
+module-root = ""
+
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.9",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
@@ -33,3 +45,9 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 fail_under = 80
+
+[tool.basedpyright]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+useLibraryCodeForTypes = true
+exclude = ["htmlcov", "storage", ".venv"]
