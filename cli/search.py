@@ -47,6 +47,10 @@ def configure_parser(subparsers: Any):
     p.set_defaults(func=run)
 
 
+def _ahead_days(start: date, end: date) -> int:
+    return max((end - date.today()).days, 0)
+
+
 def run(args):
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -64,7 +68,7 @@ async def _async_run(args):
     await manager.run(
         start_date=start,
         end_date=end,
-        max_days_ahead=args.max_days,
+        max_days_ahead=_ahead_days(start, end),
         currency=args.currency,
         rate=args.rate,
         workers=args.workers,
