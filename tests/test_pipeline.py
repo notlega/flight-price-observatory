@@ -292,7 +292,10 @@ async def test_retry_loop_refreshes_when_pool_low():
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
         patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
+        patch("collector.services.search_pipeline.date") as fake_date,
     ):
+        fake_date.today.return_value = date(2026, 8, 1)
+        fake_date.side_effect = lambda *a, **k: date(*a, **k)
         await pipeline._retry_loop(rounds=1)
     assert rotator.refreshes
     assert repo.upserts[-1]["success"] is True
@@ -314,9 +317,64 @@ async def test_retry_loop_recovers_no_proxy_and_data(error_type):
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
         patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
+        patch("collector.services.search_pipeline.date") as fake_date,
     ):
+        fake_date.today.return_value = date(2026, 8, 1)
+        fake_date.side_effect = lambda *a, **k: date(*a, **k)
         await pipeline._retry_loop(rounds=1)
     assert repo.upserts[-1]["success"] is True
+
+
+async def test_retry_loop_skips_past_departures():
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(working=20)
+    repo = FakeRepo()
+    repo.failed = [(ROUTE, "2000-01-01", "", "ONE_WAY")]
+    repo.upserts = [{"error_type": ErrorType.CONNECTION, "success": False}]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    await pipeline._retry_loop(rounds=3)
+    assert rotator.refreshes == []
+    assert len(repo.upserts) == 1
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [
+        (date(2026, 8, 1), date(2026, 8, 5)),
+        (date(2026, 8, 10), date(2026, 8, 5)),
+    ],
+)
+async def test_run_empty_task_window_noop(tmp_path, start, end):
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    pipeline.db_path = str(tmp_path / "state.db")
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
+    ):
+        await pipeline.run(start, end, max_days_ahead=330)
+    assert repo.inserted == []
+    assert repo.upserts == []
+    convert.assert_awaited_once()
+
+
+async def test_run_preflight_refreshes_when_no_proxies(tmp_path):
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(working=0)
+    repo = FakeRepo()
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    pipeline.db_path = str(tmp_path / "state.db")
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()),
+    ):
+        with pytest.raises(RuntimeError, match="refusing to run"):
+            await pipeline.run(date(2026, 12, 1), date(2026, 12, 1), max_days_ahead=330)
+    assert rotator.refreshes == [(False, None), (True, None)]
 
 
 async def test_run_orchestrates_end_to_end(tmp_path):

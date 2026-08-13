@@ -319,6 +319,8 @@ class BulkSearchPipeline:
                 tuple[BaseProvider, Airport, Airport, str, str | None, str]
             ] = []
             for route, dep_date, return_date, flight_type in failed:
+                if dep_date < date.today().isoformat():
+                    continue
                 if route in provider_map:
                     provider, origin, dest = provider_map[route]
                     retry_tasks.append(
@@ -354,6 +356,7 @@ class BulkSearchPipeline:
     ]:
         tasks: list[tuple[BaseProvider, Airport, Airport, str, str | None, str]] = []
         seed_rows: list[tuple[str, str, str, str, str, str]] = []
+        today = date.today()
 
         def supports(provider: BaseProvider, origin: str, dest: str) -> bool:
             return provider.supports is None or (origin, dest) in provider.supports
@@ -367,7 +370,7 @@ class BulkSearchPipeline:
                 route = _route_key(origin, dest)
                 current = start_date
                 while current <= effective_end:
-                    if current < date.today():
+                    if current < today:
                         current += timedelta(days=1)
                         continue
                     ds = current.isoformat()
@@ -402,7 +405,7 @@ class BulkSearchPipeline:
                 for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
                     current = start_date
                     while current <= effective_end:
-                        if current < date.today():
+                        if current < today:
                             current += timedelta(days=1)
                             continue
                         ds = current.isoformat()
@@ -452,6 +455,9 @@ class BulkSearchPipeline:
             await self.repo.insert_ignore_all(seed_rows)
             await proxy_task
 
+            if self.rotator.working_count() == 0:
+                logger.warning("Zero working proxies; force-refreshing before abort")
+                await self.rotator.refresh(force=True)
             if self.rotator.working_count() == 0:
                 raise RuntimeError(
                     "Zero working proxies — refusing to run without proxy cover"
