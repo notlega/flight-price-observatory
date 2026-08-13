@@ -402,6 +402,7 @@ async def test_report_rate_limited_evicts_after_threshold():
         await rot.report_rate_limited(victim, seconds=60)
     assert rot.working_count() == 1
     assert rot._proxies[0].url == "http://b:2"
+    assert rot._blacklist["http://a:1"] > time.monotonic()
 
 
 async def test_report_rate_limited_count_roundtrips_cache(tmp_path):
@@ -545,6 +546,52 @@ async def test_refresh_uses_fresh_cache():
         await rot.refresh(force=False)
     assert rot.working_count() == 2
     fetch.assert_not_called()
+
+
+async def test_evicted_proxy_excluded_from_cache_fresh():
+    rot = ProxyRotator()
+    rot._blacklist["http://bad:1"] = time.monotonic() + 600
+    cached = [make_proxy(url="http://bad:1"), make_proxy(url="http://good:2")]
+    with (
+        patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
+        patch("collector.proxy._parse_all_sources") as fetch,
+    ):
+        await rot.refresh(force=False)
+    assert [p.url for p in rot._proxies] == ["http://good:2"]
+    fetch.assert_not_called()
+
+
+async def test_dead_proxy_excluded_from_cache_fresh():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url="http://dead:1")])
+    await rot.report_failure(rot._proxies[0])
+    assert rot.working_count() == 0
+    cached = [make_proxy(url="http://dead:1"), make_proxy(url="http://good:2")]
+    with (
+        patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
+        patch("collector.proxy._parse_all_sources") as fetch,
+    ):
+        await rot.refresh(force=False)
+    assert [p.url for p in rot._proxies] == ["http://good:2"]
+    fetch.assert_not_called()
+
+
+async def test_blacklist_expiry_readmits_proxy():
+    rot = ProxyRotator()
+    rot._blacklist["http://bad:1"] = time.monotonic() - 1
+    cached = [make_proxy(url="http://bad:1")]
+    with (
+        patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
+        patch("collector.proxy._parse_all_sources") as fetch,
+    ):
+        await rot.refresh(force=False)
+    assert [p.url for p in rot._proxies] == ["http://bad:1"]
+    assert rot._blacklist == {}
+    fetch.assert_not_called()
+
+
+def test_last_force_refresh_init_allows_immediate_refill():
+    assert ProxyRotator()._last_force_refresh == float("-inf")
 
 
 async def test_refresh_force_skips_cache():

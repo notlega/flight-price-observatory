@@ -40,6 +40,8 @@ _RATE_LIMIT_COOLDOWN = 60
 _MAX_429_EVICTIONS = 3
 _REFILL_THRESHOLD = 20
 _FORCE_REFETCH_COOLDOWN = 30 * 60
+_EVICT_BLACKLIST_TTL = 30 * 60
+_DEAD_BLACKLIST_TTL = 10 * 60
 
 
 def _build_sources() -> list[tuple[str, str]]:
@@ -351,7 +353,8 @@ class ProxyRotator:
         self._weight_pool_len = 0
         self._refresh_task: asyncio.Task | None = None
         self._schedule_lock = asyncio.Lock()
-        self._last_force_refresh = 0.0
+        self._last_force_refresh = float("-inf")
+        self._blacklist: dict[str, float] = {}
 
     async def _validate(
         self, proxies: list[ProxyInfo], target: int | None = None
@@ -440,11 +443,14 @@ class ProxyRotator:
                 cached_at, cached_proxies = cached
                 age = time.time() - cached_at
                 if age < _CACHE_FRESH_TTL:
-                    await self._set_pool(cached_proxies)
+                    excluded = self._active_blacklist()
+                    pool = [p for p in cached_proxies if p.url not in excluded]
+                    await self._set_pool(pool)
                     logger.info(
-                        "Proxy cache fresh (%.0fs old): %d proxies",
+                        "Proxy cache fresh (%.0fs old): %d proxies (%d blacklisted)",
                         age,
-                        len(cached_proxies),
+                        len(pool),
+                        len(cached_proxies) - len(pool),
                     )
                     return
                 if age < _CACHE_MAX_AGE:
@@ -537,6 +543,7 @@ class ProxyRotator:
                 )
             except ValueError:
                 pass
+            self._blacklist[proxy.url] = time.monotonic() + _DEAD_BLACKLIST_TTL
 
     async def report_rate_limited(self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN):
         async with self._lock:
@@ -552,6 +559,7 @@ class ProxyRotator:
                     )
                 except ValueError:
                     pass
+                self._blacklist[proxy.url] = time.monotonic() + _EVICT_BLACKLIST_TTL
                 return
             proxy.rate_limit_until = time.monotonic() + seconds
             self._weight_pool_len = 0
@@ -564,3 +572,10 @@ class ProxyRotator:
 
     def working_count(self) -> int:
         return len(self._proxies)
+
+    def _active_blacklist(self) -> set[str]:
+        now = time.monotonic()
+        expired = [u for u, exp in self._blacklist.items() if exp <= now]
+        for u in expired:
+            del self._blacklist[u]
+        return set(self._blacklist)
