@@ -578,7 +578,7 @@ async def test_auto_refresh_falls_back_when_cache_dead():
     assert rot.working_count() == 1
 
 
-async def test_auto_refresh_refills_when_pool_below_threshold():
+async def test_auto_refresh_partial_pool_skips_refill():
     rot = ProxyRotator()
     await rot._set_pool(
         [make_proxy(url=f"http://p{i}:1") for i in range(15)]
@@ -595,11 +595,8 @@ async def test_auto_refresh_refills_when_pool_below_threshold():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [
-        {"max_per_source": 150},
-        {"force": True, "max_per_source": 150},
-    ]
-    assert rot.working_count() == 22
+    assert calls == [{"max_per_source": 150}]
+    assert rot.working_count() == 15
 
 
 async def test_auto_refresh_skips_refill_when_pool_ok():
@@ -734,6 +731,76 @@ async def test_auto_refresh_low_pool_keeps_long_cooldown():
         await rot._auto_refresh()
 
     assert not any(c.get("force") for c in calls)
+
+
+async def test_auto_refresh_partial_recovery_resets_backoff():
+    rot = ProxyRotator()
+    rot._consecutive_force_refetches = 5
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(5)])
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [{"max_per_source": 150}]
+    assert rot._consecutive_force_refetches == 0
+
+
+async def test_auto_refresh_backoff_caps_at_longest_interval():
+    rot = ProxyRotator()
+    rot._last_force_refresh = float("-inf")
+    rot._consecutive_force_refetches = 10
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [
+        {"max_per_source": 150},
+        {"force": True, "max_per_source": 150},
+    ]
+    assert rot._consecutive_force_refetches == 11
+
+
+async def test_auto_refresh_refresh_error_keeps_state():
+    rot = ProxyRotator()
+    rot._consecutive_force_refetches = 2
+
+    async def boom(**kwargs):
+        raise RuntimeError("fetch failed")
+
+    with patch.object(rot, "refresh", side_effect=boom):
+        await rot._auto_refresh()
+
+    assert rot._consecutive_force_refetches == 2
+    assert rot._refresh_task is None
+
+
+async def test_auto_refresh_parked_pool_then_revive_resets_backoff():
+    rot = ProxyRotator()
+    parked = make_proxy(url="http://p1:1")
+    parked.rate_limit_until = time.monotonic() + 3600
+    await rot._set_pool([parked])
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+        rot._last_auto_refresh = float("-inf")
+        rot._last_force_refresh = float("-inf")
+        parked.rate_limit_until = 0.0
+        await rot._auto_refresh()
+
+    assert rot._consecutive_force_refetches == 0
+    assert any(c.get("force") for c in calls)
 
 
 async def test_cache_fresh_keeps_larger_live_pool():

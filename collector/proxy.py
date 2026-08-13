@@ -586,7 +586,7 @@ class ProxyRotator:
             logger.info("Proxy pool exhausted; auto-refreshing")
             await self.refresh(max_per_source=_REFILL_MAX_PER_SOURCE)
             usable = self.usable_count()
-            if usable >= _REFILL_THRESHOLD:
+            if usable > 0:
                 self._consecutive_force_refetches = 0
                 return
             if usable == 0:
