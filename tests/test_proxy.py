@@ -198,15 +198,26 @@ def test_build_sources_count():
     assert len(_build_sources()) == 64
 
 
-def test_normalise_url_drops_ipv6():
-    assert _normalise_url("http", "[::1]:8080") is None
+def test_normalise_url_bare_ipv6():
+    assert _normalise_url("http", "[::1]:8080") == "http://[::1]:8080"
 
 
-async def test_parse_source_preserves_uppercase_scheme():
+async def test_parse_source_canonicalises_uppercase_scheme():
     proxies = await _parse_source(
         "http", "https://s", _fake_client("HTTP://1.2.3.4:80")
     )
-    assert [(p.url, p.protocol) for p in proxies] == [("HTTP://1.2.3.4:80", "HTTP")]
+    assert [(p.url, p.protocol) for p in proxies] == [("http://1.2.3.4:80", "http")]
+
+
+async def test_parse_source_canonicalises_duplicates():
+    body = "http://9.9.9.9:9/\n9.9.9.9:9\nHTTP://9.9.9.9:9"
+    proxies = await _parse_source("http", "https://s", _fake_client(body))
+    assert [p.url for p in proxies] == ["http://9.9.9.9:9"] * 3
+
+
+async def test_parse_source_rejects_invalid_scheme():
+    proxies = await _parse_source("http", "https://s", _fake_client("ftp://1.2.3.4:21"))
+    assert proxies == []
 
 
 async def test_parse_all_sources_first_wins_for_same_proxy():
@@ -957,6 +968,23 @@ async def test_evicted_proxy_excluded_from_cache_fresh():
         await rot.refresh(force=False)
     assert [p.url for p in rot._proxies] == ["http://good:2"]
     fetch.assert_not_called()
+
+
+async def test_blacklisted_proxy_excluded_from_force_refresh():
+    rot = ProxyRotator()
+    rot._blacklist["http://bad:1"] = time.monotonic() + 600
+    fresh = [make_proxy(url="http://bad:1"), make_proxy(url="http://good:2")]
+    with (
+        patch("collector.proxy._parse_all_sources", return_value=fresh),
+        patch("collector.proxy._save_cache"),
+        patch.object(
+            rot,
+            "_validate",
+            new=AsyncMock(side_effect=lambda proxies, **kw: proxies),
+        ),
+    ):
+        await rot.refresh(force=True)
+    assert [p.url for p in rot._proxies] == ["http://good:2"]
 
 
 async def test_dead_proxy_excluded_from_cache_fresh():

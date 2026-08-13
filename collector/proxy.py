@@ -123,12 +123,39 @@ _PROTOCOL_PREFIX: dict[str, str] = {
 
 
 def _normalise_url(protocol: str, raw: str) -> str | None:
+    raw = raw.strip()
     if "://" in raw:
-        return raw
-    if ":" not in raw:
+        scheme, rest = raw.split("://", 1)
+        scheme = scheme.lower()
+        if scheme not in _PROTOCOL_PREFIX:
+            return None
+        prefix = f"{scheme}://"
+    else:
+        scheme = protocol
+        if scheme not in _PROTOCOL_PREFIX:
+            return None
+        prefix = _PROTOCOL_PREFIX[scheme]
+        rest = raw
+
+    rest = rest.rstrip("/")
+    if not rest:
         return None
-    ip, port = raw.split(":", 1)
-    if not ip:
+    if rest.startswith("["):
+        end = rest.find("]")
+        if end == -1:
+            return None
+        host = rest[: end + 1]
+        tail = rest[end + 1 :]
+    else:
+        if ":" not in rest:
+            return None
+        host, _, port_str = rest.partition(":")
+        if not host:
+            return None
+        tail = f":{port_str}"
+
+    port = tail.lstrip(":")
+    if not port or ":" in port:
         return None
     try:
         port = int(port)
@@ -136,8 +163,7 @@ def _normalise_url(protocol: str, raw: str) -> str | None:
         return None
     if not 1 <= port <= 65535:
         return None
-    prefix = _PROTOCOL_PREFIX[protocol]
-    return f"{prefix}{ip}:{port}"
+    return f"{prefix}{host}:{port}"
 
 
 async def _parse_source(
@@ -155,14 +181,10 @@ async def _parse_source(
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if "://" in line:
-            url_str = line
-            proto = line.split("://", 1)[0]
-        else:
-            url_str = _normalise_url(protocol, line)
-            if url_str is None:
-                continue
-            proto = protocol
+        url_str = _normalise_url(protocol, line)
+        if url_str is None:
+            continue
+        proto = url_str.split("://", 1)[0]
         proxies.append(ProxyInfo(url=url_str, protocol=proto))
     return proxies
 
@@ -519,6 +541,9 @@ class ProxyRotator:
         if not all_proxies:
             logger.warning("No proxies fetched; keeping existing pool")
             return
+        excluded = self._active_blacklist()
+        if excluded:
+            all_proxies = [p for p in all_proxies if p.url not in excluded]
         logger.info("Total unique proxies: %d", len(all_proxies))
 
         valid = await self._validate(all_proxies, target=_VALIDATE_TARGET)
