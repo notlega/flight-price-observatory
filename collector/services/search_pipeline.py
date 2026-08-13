@@ -31,6 +31,9 @@ _MAX_ATTEMPTS = 3
 _MIN_POOL_BEFORE_RETRY = 20
 _NO_PROXY_DELAY = 0.5
 
+type ProviderTask = tuple[BaseProvider, Airport, Airport, str, str | None, str]
+type SeedRow = tuple[str, str, str, str, str, str]
+
 
 def _route_key(origin: Airport, dest: Airport) -> str:
     return f"{origin.value}|{dest.value}"
@@ -359,23 +362,19 @@ class BulkSearchPipeline:
         if by_error:
             logger.warning("Failed breakdown: %s", dict(by_error))
 
-    async def _build_tasks(
+    def _tasks_for_provider(
         self,
+        provider: BaseProvider,
         start_date: date,
         effective_end: date,
-    ) -> tuple[
-        list[tuple[BaseProvider, Airport, Airport, str, str | None, str]],
-        list[tuple[str, str, str, str, str, str]],
-    ]:
-        tasks: list[tuple[BaseProvider, Airport, Airport, str, str | None, str]] = []
-        seed_rows: list[tuple[str, str, str, str, str, str]] = []
-        today = date.today()
-
-        def supports(provider: BaseProvider, origin: str, dest: str) -> bool:
+        today: date,
+        tasks: list[ProviderTask],
+        seed_rows: list[SeedRow],
+    ) -> None:
+        def supports(origin: str, dest: str) -> bool:
             return provider.supports is None or (origin, dest) in provider.supports
 
         def emit(
-            provider: BaseProvider,
             origin: Airport,
             dest: Airport,
             dep_date: date,
@@ -387,9 +386,7 @@ class BulkSearchPipeline:
                 if return_date
                 else FlightType.ONE_WAY.value
             )
-            tasks.append(
-                (provider, origin, dest, ds, return_date, flight_type)
-            )
+            tasks.append((provider, origin, dest, ds, return_date, flight_type))
             seed_rows.append(
                 (
                     _route_key(origin, dest),
@@ -401,26 +398,41 @@ class BulkSearchPipeline:
                 )
             )
 
-        for provider in self.providers:
-            for r in RouteCatalog.one_way_routes():
-                if not supports(provider, r.origin, r.dest):
-                    continue
-                origin = RouteCatalog.resolve(r.origin)
-                dest = RouteCatalog.resolve(r.dest)
-                for current in _dates_between(start_date, effective_end, today):
-                    emit(provider, origin, dest, current, None)
+        for r in RouteCatalog.one_way_routes():
+            if not supports(r.origin, r.dest):
+                continue
+            origin = RouteCatalog.resolve(r.origin)
+            dest = RouteCatalog.resolve(r.dest)
+            for current in _dates_between(start_date, effective_end, today):
+                emit(origin, dest, current, None)
 
-            for r in RouteCatalog.round_trip_routes():
-                if not supports(provider, r.origin, r.dest):
-                    continue
-                origin = RouteCatalog.resolve(r.origin)
-                dest = RouteCatalog.resolve(r.dest)
-                for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
-                    for current in _dates_between(start_date, effective_end, today):
-                        return_date = (
-                            current + timedelta(days=offset)
-                        ).isoformat()
-                        emit(provider, origin, dest, current, return_date)
+        for r in RouteCatalog.round_trip_routes():
+            if not supports(r.origin, r.dest):
+                continue
+            origin = RouteCatalog.resolve(r.origin)
+            dest = RouteCatalog.resolve(r.dest)
+            for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
+                for current in _dates_between(start_date, effective_end, today):
+                    emit(
+                        origin,
+                        dest,
+                        current,
+                        (current + timedelta(days=offset)).isoformat(),
+                    )
+
+    async def _build_tasks(
+        self,
+        start_date: date,
+        effective_end: date,
+    ) -> tuple[list[ProviderTask], list[SeedRow]]:
+        tasks: list[ProviderTask] = []
+        seed_rows: list[SeedRow] = []
+        today = date.today()
+
+        for provider in self.providers:
+            self._tasks_for_provider(
+                provider, start_date, effective_end, today, tasks, seed_rows
+            )
 
         return tasks, seed_rows
 

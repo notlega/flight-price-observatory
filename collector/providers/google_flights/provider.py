@@ -59,6 +59,42 @@ def _extract_flights_raw(inner: list) -> list:
     ]
 
 
+def _raise_for_http_status(response: requests.Response, url: str) -> None:
+    if response.status_code == 429:
+        raise ProviderRateLimitedError(f"HTTP 429 from {url}")
+    if response.status_code >= 500:
+        raise ProviderConnectionError(f"HTTP {response.status_code} from {url}")
+    body = response.text.lower()
+    if response.status_code == 403 or (
+        response.status_code == 200
+        and any(marker in body for marker in _BLOCK_MARKERS)
+    ):
+        raise ProviderRateLimitedError(f"HTTP {response.status_code} block from {url}")
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise ProviderDataError(f"HTTP {response.status_code} from {url}") from e
+
+
+def _parse_flights(
+    flights_raw: list, status_code: int, response_len: int
+) -> list[FlightResult]:
+    flights: list[FlightResult] = []
+    for row in flights_raw:
+        try:
+            flights.append(parse_flight_row(row))
+        except Exception as e:
+            logger.debug("Skipping unparseable flight row: %s", e)
+    if not flights:
+        logger.debug(
+            "Payload parsed but no flights: status=%s len=%s raw_rows=%d",
+            status_code,
+            response_len,
+            len(flights_raw),
+        )
+    return flights
+
+
 class GoogleFlightsProvider(BaseProvider):
     name = "google_flights"
 
@@ -129,20 +165,7 @@ class GoogleFlightsProvider(BaseProvider):
         except requests.exceptions.ConnectionError as e:
             raise ProviderConnectionError(str(e)) from e
 
-        if response.status_code == 429:
-            raise ProviderRateLimitedError(f"HTTP 429 from {url}")
-        if response.status_code >= 500:
-            raise ProviderConnectionError(f"HTTP {response.status_code} from {url}")
-        body = response.text.lower()
-        if response.status_code == 403 or (
-            response.status_code == 200
-            and any(marker in body for marker in _BLOCK_MARKERS)
-        ):
-            raise ProviderRateLimitedError(f"HTTP {response.status_code} block from {url}")
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            raise ProviderDataError(f"HTTP {response.status_code} from {url}") from e
+        _raise_for_http_status(response, url)
 
         inner = parse_first_wrb_payload(response.text)
         if inner is None:
@@ -159,20 +182,9 @@ class GoogleFlightsProvider(BaseProvider):
         except (IndexError, TypeError):
             return None
 
-        flights: list[FlightResult] = []
-        for row in flights_raw:
-            try:
-                flights.append(parse_flight_row(row))
-            except Exception:
-                continue
-
-        if not flights:
-            logger.debug(
-                "Payload parsed but no flights: status=%s len=%s raw_rows=%d",
-                response.status_code,
-                len(response.text),
-                len(flights_raw),
-            )
+        flights = _parse_flights(
+            flights_raw, response.status_code, len(response.text)
+        )
         return flights or None
 
     @staticmethod
@@ -189,6 +201,45 @@ class GoogleFlightsProvider(BaseProvider):
                 "booking_token": inbound.booking_token or outbound.booking_token,
             }
         )
+
+    async def _search_round_trip(
+        self,
+        outbound: list[FlightResult],
+        filters: FlightSearchFilters,
+        currency: str,
+        proxy_url: str,
+        session: AsyncSession,
+    ) -> list[dict] | None:
+        selected = outbound[: self._rt_expand_top_n]
+
+        async def expand(out: FlightResult) -> list[FlightResult]:
+            next_filters = deepcopy(filters)
+            next_filters.flight_segments[0].selected_flight = out
+            inbound = await self._post_shopping(
+                next_filters, currency, proxy_url, session
+            )
+            if not inbound:
+                return []
+            return [self._merge_round_trip(out, rt) for rt in inbound]
+
+        results = await asyncio.gather(
+            *(expand(o) for o in selected), return_exceptions=True
+        )
+
+        combos: list[FlightResult] = []
+        first_error: BaseException | None = None
+        for result in results:
+            if isinstance(result, BaseException):
+                if first_error is None:
+                    first_error = result
+                logger.debug("Round-trip expand failed: %s", result)
+                continue
+            combos.extend(result)
+        if not combos:
+            if first_error is not None:
+                raise first_error
+            return None
+        return [c.model_dump(mode="json") for c in combos]
 
     async def search(
         self,
@@ -233,36 +284,9 @@ class GoogleFlightsProvider(BaseProvider):
             if not return_date:
                 return [f.model_dump(mode="json") for f in outbound]
 
-            selected = outbound[: self._rt_expand_top_n]
-
-            async def expand(out: FlightResult) -> list[FlightResult]:
-                next_filters = deepcopy(filters)
-                next_filters.flight_segments[0].selected_flight = out
-                inbound = await self._post_shopping(
-                    next_filters, currency, proxy_url, session
-                )
-                if not inbound:
-                    return []
-                return [self._merge_round_trip(out, rt) for rt in inbound]
-
-            results = await asyncio.gather(
-                *(expand(o) for o in selected), return_exceptions=True
+            return await self._search_round_trip(
+                outbound, filters, currency, proxy_url, session
             )
-
-            combos: list[FlightResult] = []
-            first_error: BaseException | None = None
-            for result in results:
-                if isinstance(result, BaseException):
-                    if first_error is None:
-                        first_error = result
-                    logger.debug("Round-trip expand failed: %s", result)
-                    continue
-                combos.extend(result)
-            if not combos:
-                if first_error is not None:
-                    raise first_error
-                return None
-            return [c.model_dump(mode="json") for c in combos]
         finally:
             if owns_session:
                 await session.close()
