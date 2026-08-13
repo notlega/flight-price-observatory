@@ -42,7 +42,7 @@ _VALIDATE_TARGET = 100
 _RATE_LIMIT_COOLDOWN = 120
 _MAX_429_EVICTIONS = 3
 _REFILL_THRESHOLD = 20
-_FORCE_REFETCH_COOLDOWN = 30 * 60
+
 _EMPTY_REFETCH_BACKOFF = (60, 120, 300, 600)
 _AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
@@ -611,18 +611,14 @@ class ProxyRotator:
             if usable > 0:
                 self._consecutive_force_refetches = 0
                 return
-            if usable == 0:
-                index = min(
-                    self._consecutive_force_refetches,
-                    len(_EMPTY_REFETCH_BACKOFF) - 1,
-                )
-                cooldown = _EMPTY_REFETCH_BACKOFF[index]
-            else:
-                cooldown = _FORCE_REFETCH_COOLDOWN
+            index = min(
+                self._consecutive_force_refetches,
+                len(_EMPTY_REFETCH_BACKOFF) - 1,
+            )
+            cooldown = _EMPTY_REFETCH_BACKOFF[index]
             if now - self._last_force_refresh > cooldown:
                 self._last_force_refresh = now
-                if usable == 0:
-                    self._consecutive_force_refetches += 1
+                self._consecutive_force_refetches += 1
                 logger.warning(
                     "Proxy pool low (%d usable < %d); fetching fresh lists",
                     usable,

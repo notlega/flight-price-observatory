@@ -72,8 +72,7 @@ class SearchRepository:
     async def open(self):
         """Open the database connection and start the writer loop."""
         db_dir = Path(self._db_path).parent
-        if db_dir:
-            db_dir.mkdir(parents=True, exist_ok=True)
+        db_dir.mkdir(parents=True, exist_ok=True)
         conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         self._conn = conn
         await conn.execute("PRAGMA journal_mode=WAL")

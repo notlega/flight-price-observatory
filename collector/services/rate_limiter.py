@@ -47,8 +47,7 @@ class RateLimiter:
             self._next_token_at = when + 1.0 / self.rate
             self.tokens = 0.0
             delay = when - now
-        if delay > 0:
-            await asyncio.sleep(delay)
+        await asyncio.sleep(delay)
 
     async def report_429(self):
         async with self._lock:

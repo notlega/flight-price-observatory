@@ -510,6 +510,6 @@ def test_ahead_days_from_today_matches_window():
     from cli.search import _ahead_days
 
     today = date.today()
-    assert _ahead_days(today, today + timedelta(days=2)) == 2
-    assert _ahead_days(today + timedelta(days=10), today + timedelta(days=12)) == 12
-    assert _ahead_days(today - timedelta(days=5), today - timedelta(days=3)) == 0
+    assert _ahead_days(today + timedelta(days=2)) == 2
+    assert _ahead_days(today + timedelta(days=12)) == 12
+    assert _ahead_days(today - timedelta(days=3)) == 0
