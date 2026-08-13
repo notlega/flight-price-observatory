@@ -75,23 +75,23 @@ def _raise_for_http_status(response: requests.Response, url: str) -> None:
         raise ProviderDataError(f"HTTP {response.status_code} from {url}") from e
 
 
-def _parse_flights(
-    flights_raw: list, status_code: int, response_len: int
-) -> list[FlightResult]:
+def _parse_flights(flights_raw: list) -> list[FlightResult]:
     flights: list[FlightResult] = []
     for row in flights_raw:
         try:
             flights.append(parse_flight_row(row))
         except Exception as e:
             logger.debug("Skipping unparseable flight row: %s", e)
-    if not flights:
-        logger.debug(
-            "Payload parsed but no flights: status=%s len=%s raw_rows=%d",
-            status_code,
-            response_len,
-            len(flights_raw),
-        )
     return flights
+
+
+def _search_context(filters: FlightSearchFilters) -> str:
+    seg = filters.flight_segments[0]
+    dep = seg.departure_airport[0][0]
+    arr = seg.arrival_airport[0][0]
+    if isinstance(dep, Airport) and isinstance(arr, Airport):
+        return f"route={dep.value}->{arr.value} dep={seg.travel_date}"
+    return f"route=?->? dep={seg.travel_date}"
 
 
 class GoogleFlightsProvider(BaseProvider):
@@ -168,8 +168,9 @@ class GoogleFlightsProvider(BaseProvider):
 
         inner = parse_first_wrb_payload(response.text)
         if inner is None:
-            logger.debug(
-                "No wrb payload: status=%s len=%s marker=%s",
+            logger.warning(
+                "No wrb payload %s: status=%s len=%s marker=%s",
+                _search_context(filters),
                 response.status_code,
                 len(response.text),
                 "wrb" in response.text,
@@ -179,9 +180,23 @@ class GoogleFlightsProvider(BaseProvider):
         try:
             flights_raw = _extract_flights_raw(inner)
         except IndexError, TypeError:
+            logger.warning(
+                "Malformed flights page %s: status=%s len=%s",
+                _search_context(filters),
+                response.status_code,
+                len(response.text),
+            )
             return None
 
-        flights = _parse_flights(flights_raw, response.status_code, len(response.text))
+        flights = _parse_flights(flights_raw)
+        if not flights:
+            logger.warning(
+                "No flights parsed %s: status=%s len=%s raw_rows=%d",
+                _search_context(filters),
+                response.status_code,
+                len(response.text),
+                len(flights_raw),
+            )
         return flights or None
 
     @staticmethod
