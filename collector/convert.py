@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RAW_DIR = "storage/raw"
 
+_BUFFER_FLUSH = 1000
+
 
 def default_output_path() -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -62,7 +64,7 @@ async def convert(
         async for row in repo.iter_successful_raw():
             buffer.append(_jsonl_row(row))
             written += 1
-            if len(buffer) >= 1000:
+            if len(buffer) >= _BUFFER_FLUSH:
                 f.writelines(buffer)
                 buffer.clear()
         if buffer:

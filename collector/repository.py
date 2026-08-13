@@ -12,6 +12,8 @@ from collector.errors import ErrorType
 
 logger = logging.getLogger(__name__)
 
+_BUSY_TIMEOUT_MS = 10000
+
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS search_results (
     route       TEXT NOT NULL,
@@ -75,7 +77,7 @@ class SearchRepository:
         conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         self._conn = conn
         await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA busy_timeout=10000")
+        await conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
         await self._migrate()
         await conn.execute(_CREATE_SQL)
         await conn.commit()

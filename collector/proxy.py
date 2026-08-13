@@ -35,6 +35,7 @@ _TEST_ECHO_URLS = [
 ]
 
 _TCP_TIMEOUT = 3.0
+_IPIFY_TIMEOUT = 5.0
 _HTTP_ECHO_TIMEOUT = 5.0
 _TCP_FILTER_LIMIT = 500
 _VALIDATE_TARGET = 100
@@ -233,11 +234,11 @@ def _extract_ip(text: str) -> str | None:
 async def _fetch_real_ip() -> str:
     try:
         async with AsyncSession() as session:
-            r = await session.get("https://api.ipify.org", timeout=5)
+            r = await session.get("https://api.ipify.org", timeout=_IPIFY_TIMEOUT)
             if r.status_code == 200:
                 return r.text.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to fetch real IP: %s", e)
     return ""
 
 
