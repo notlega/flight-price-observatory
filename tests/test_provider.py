@@ -140,6 +140,48 @@ async def test_search_block_marker_raises_rate_limited(body):
         await _search(session)
 
 
+async def test_search_uppercase_block_marker_raises_rate_limited():
+    session = FakeSession(
+        response=FakeResponse(status_code=200, text="<title>UNUSUAL TRAFFIC</title>")
+    )
+    with pytest.raises(ProviderRateLimitedError):
+        await _search(session)
+
+
+@pytest.mark.parametrize("status", [500, 503])
+async def test_search_server_error_with_block_marker_maps_to_connection(status):
+    session = FakeSession(
+        response=FakeResponse(status_code=status, text="captcha required")
+    )
+    with pytest.raises(ProviderConnectionError):
+        await _search(session)
+
+
+async def test_search_429_with_block_marker_maps_to_rate_limited():
+    session = FakeSession(
+        response=FakeResponse(status_code=429, text="captcha required")
+    )
+    with pytest.raises(ProviderRateLimitedError):
+        await _search(session)
+
+
+async def test_search_403_with_block_marker_maps_to_rate_limited():
+    session = FakeSession(
+        response=FakeResponse(status_code=403, text="captcha required")
+    )
+    with pytest.raises(ProviderRateLimitedError):
+        await _search(session)
+
+
+@pytest.mark.parametrize("status", [400, 404])
+async def test_search_client_error_with_block_marker_maps_to_data(status):
+    session = FakeSession(
+        response=FakeResponse(status_code=status, text="access denied")
+    )
+    with pytest.raises(ProviderDataError):
+        await _search(session)
+
+
 async def test_search_posts_with_proxy_and_returns_parsed_flights():
     session = FakeSession(response=FakeResponse(status_code=200, text=""))
 
@@ -395,3 +437,288 @@ async def test_search_round_trip_raises_when_all_expands_fail():
             )
 
     assert session.post.await_count == 4
+
+
+async def test_search_round_trip_raises_when_empty_inbound_and_error_mixed():
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+    session.post.side_effect = [
+        FakeResponse(status_code=200, text=""),
+        FakeResponse(status_code=200, text=""),
+        ProviderRateLimitedError("HTTP 429"),
+    ]
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    def make_flight(price):
+        return _FakeFlight(
+            price,
+            legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+            token=f"t{price}",
+        )
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            side_effect=[
+                payload([100, 200]),
+                None,
+                payload([30]),
+            ],
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            side_effect=lambda row: make_flight(row),
+        ),
+    ):
+        with pytest.raises(ProviderRateLimitedError):
+            await _provider(rt_expand_top_n=2).search(
+                SIN,
+                KUL,
+                "2026-12-01",
+                currency="SGD",
+                proxy_url=PROXY,
+                session=cast(Any, session),
+                return_date="2026-12-08",
+            )
+
+    assert session.post.await_count == 3
+
+
+async def test_search_round_trip_returns_none_when_all_expands_empty():
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    def make_flight(price):
+        return _FakeFlight(
+            price,
+            legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+            token=f"t{price}",
+        )
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            side_effect=[payload([100, 200]), None, None],
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            side_effect=lambda row: make_flight(row),
+        ),
+    ):
+        result = await _provider(rt_expand_top_n=2).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
+
+    assert result is None
+    assert session.post.await_count == 3
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ProviderRateLimitedError("HTTP 429"),
+        ProviderTimeoutError("timeout"),
+        ProviderConnectionError("conn"),
+    ],
+)
+async def test_search_round_trip_all_expands_fail_raises_same_error(error):
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+    session.post.side_effect = [
+        FakeResponse(status_code=200, text=""),
+        error,
+        error,
+    ]
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    def make_flight(price):
+        return _FakeFlight(
+            price,
+            legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+            token=f"t{price}",
+        )
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            side_effect=[payload([100, 200]), payload([30]), payload([30])],
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            side_effect=lambda row: make_flight(row),
+        ),
+    ):
+        with pytest.raises(type(error)):
+            await _provider(rt_expand_top_n=2).search(
+                SIN,
+                KUL,
+                "2026-12-01",
+                currency="SGD",
+                proxy_url=PROXY,
+                session=cast(Any, session),
+                return_date="2026-12-08",
+            )
+
+    assert session.post.await_count == 3
+
+
+async def test_search_round_trip_keeps_single_successful_expand():
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+    session.post.side_effect = [
+        FakeResponse(status_code=200, text=""),
+        ProviderRateLimitedError("HTTP 429"),
+        FakeResponse(status_code=200, text=""),
+        ProviderRateLimitedError("HTTP 429"),
+    ]
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    def make_flight(price):
+        return _FakeFlight(
+            price,
+            legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+            token=f"t{price}",
+        )
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            side_effect=[payload([100, 200, 300]), payload([30])],
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            side_effect=lambda row: make_flight(row),
+        ),
+    ):
+        result = await _provider(rt_expand_top_n=3).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
+
+    assert result is not None
+    assert [combo["price"] for combo in result] == [230]
+    assert session.post.await_count == 4
+
+
+async def test_search_round_trip_preserves_outbound_order():
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    def make_flight(price):
+        return _FakeFlight(
+            price,
+            legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+            token=f"t{price}",
+        )
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            side_effect=[payload([300, 100, 200]), payload([10]), payload([10]), payload([10])],
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            side_effect=lambda row: make_flight(row),
+        ),
+    ):
+        result = await _provider(rt_expand_top_n=3).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
+
+    assert result is not None
+    assert [combo["price"] for combo in result] == [310, 110, 210]
+
+
+async def test_search_round_trip_zero_expand_top_n_returns_none():
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            return_value=payload([100, 200]),
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            return_value=_FakeFlight(
+                100,
+                legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+                token="t100",
+            ),
+        ),
+    ):
+        result = await _provider(rt_expand_top_n=0).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
+
+    assert result is None
+    assert session.post.await_count == 1
+
+
+async def test_search_round_trip_single_expand_empty_returns_none():
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+
+    def payload(rows):
+        return [[], [], [rows], None]
+
+    def make_flight(price):
+        return _FakeFlight(
+            price,
+            legs=[_FakeLeg(SIN, KUL, datetime(2026, 12, 1))],
+            token=f"t{price}",
+        )
+
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            side_effect=[payload([100]), None],
+        ),
+        patch(
+            "collector.providers.google_flights.provider.parse_flight_row",
+            side_effect=lambda row: make_flight(row),
+        ),
+    ):
+        result = await _provider(rt_expand_top_n=1).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
+
+    assert result is None
+    assert session.post.await_count == 2

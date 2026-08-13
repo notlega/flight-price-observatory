@@ -134,8 +134,9 @@ class GoogleFlightsProvider(BaseProvider):
         if response.status_code >= 500:
             raise ProviderConnectionError(f"HTTP {response.status_code} from {url}")
         body = response.text.lower()
-        if response.status_code == 403 or any(
-            marker in body for marker in _BLOCK_MARKERS
+        if response.status_code == 403 or (
+            response.status_code == 200
+            and any(marker in body for marker in _BLOCK_MARKERS)
         ):
             raise ProviderRateLimitedError(f"HTTP {response.status_code} block from {url}")
         try:
