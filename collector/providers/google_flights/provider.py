@@ -15,6 +15,7 @@ from fli.models import (
     SortBy,
     TripType,
 )
+from pydantic import ValidationError
 from fli.search._decoders import parse_flight_row
 from fli.search._urls import with_locale_params
 from fli.search._wire import parse_first_wrb_payload
@@ -186,7 +187,10 @@ class GoogleFlightsProvider(BaseProvider):
         self._require_proxy(proxy_url)
         assert proxy_url is not None
 
-        filters = self._build_filters(origin, dest, date_str, return_date)
+        try:
+            filters = self._build_filters(origin, dest, date_str, return_date)
+        except ValidationError as e:
+            raise ProviderDataError(f"Invalid search parameters: {e}") from e
 
         owns_session = session is None
         session = session or AsyncSession()

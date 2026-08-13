@@ -129,7 +129,7 @@ class BulkSearchPipeline:
             )
             error_type = result.error_type
             if (
-                error_type in (ErrorType.TIMEOUT, ErrorType.CONNECTION, ErrorType.OTHER)
+                error_type in (ErrorType.TIMEOUT, ErrorType.CONNECTION)
                 and result.proxy_info is not None
             ):
                 await self.rotator.report_failure(result.proxy_info)

@@ -243,6 +243,21 @@ async def test_data_error_not_reported_to_rotator():
     assert pipeline.repo.upserts[0]["error_type"] == ErrorType.DATA
 
 
+async def test_other_error_not_reported_to_rotator():
+    pipeline = _make_pipeline(provider=FakeProvider(script=[RuntimeError("boom")] * 3))
+    await pipeline._search_and_store(
+        pipeline.providers[0],
+        SIN,
+        KUL,
+        DEP,
+        None,
+        FlightType.ONE_WAY.value,
+        AsyncMock(),
+    )
+    assert pipeline.rotator.failures == []
+    assert pipeline.repo.upserts[0]["error_type"] == ErrorType.OTHER
+
+
 async def test_run_batch_records_unexpected_failure():
     class FlakyRepo(FakeRepo):
         def __init__(self):

@@ -62,6 +62,18 @@ async def _search(session: Any):
     )
 
 
+async def test_search_past_date_raises_data_error():
+    with pytest.raises(ProviderDataError):
+        await _provider().search(
+            SIN,
+            KUL,
+            "2000-01-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, FakeSession(response=FakeResponse(status_code=200, text=""))),
+        )
+
+
 @pytest.mark.parametrize(
     "status,expected",
     [
