@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -73,13 +74,23 @@ class SearchRepository:
         """Open the database connection and start the writer loop."""
         db_dir = Path(self._db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
+        probe = sqlite3.connect(self._db_path)
+        try:
+            probe.execute("SELECT 1")
+        finally:
+            probe.close()
         conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         self._conn = conn
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-        await self._migrate()
-        await conn.execute(_CREATE_SQL)
-        await conn.commit()
+        try:
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            await self._migrate()
+            await conn.execute(_CREATE_SQL)
+            await conn.commit()
+        except BaseException:
+            await conn.close()
+            self._conn = None
+            raise
         self._write_queue = asyncio.Queue()
         self._writer_task = asyncio.create_task(self._writer_loop())
 
@@ -93,23 +104,25 @@ class SearchRepository:
         batch: list[tuple] = []
         while True:
             item = await self._q.get()
-            self._q.task_done()
             if item is _STOP:
                 if batch:
                     await self._c.executemany(_INSERT_SQL, batch)
                     await self._c.commit()
+                self._q.task_done()
                 return
             if item is _FLUSH:
                 if batch:
                     await self._c.executemany(_INSERT_SQL, batch)
                     await self._c.commit()
                     batch.clear()
+                self._q.task_done()
                 continue
             batch.append(item)
             if len(batch) >= _WRITE_BATCH_SIZE:
                 await self._c.executemany(_INSERT_SQL, batch)
                 await self._c.commit()
                 batch.clear()
+            self._q.task_done()
 
     async def flush(self):
         """Commit all queued writes (await the writer draining the queue)."""

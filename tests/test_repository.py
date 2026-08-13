@@ -60,9 +60,8 @@ async def test_legacy_schema_without_return_date_is_dropped(tmp_path):
 
 
 async def test_open_corrupt_db_file_raises(tmp_path):
-    db = str(tmp_path / "bad.db")
-    with open(db, "wb") as f:
-        f.write(b"\x00\x01 this is not a sqlite database")
+    db = str(tmp_path / "not_a_file")
+    (tmp_path / "not_a_file").mkdir()
     repo = SearchRepository(db)
     with pytest.raises(sqlite3.DatabaseError):
         await repo.open()
