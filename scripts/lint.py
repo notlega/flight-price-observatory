@@ -1,3 +1,5 @@
+"""Run project linting (ruff) and type checking (basedpyright)."""
+
 import subprocess
 
 

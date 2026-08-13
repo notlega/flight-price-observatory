@@ -9,6 +9,7 @@ import random
 import re
 import time
 from bisect import bisect_left
+from pathlib import Path
 
 import httpx
 from curl_cffi.requests import AsyncSession, exceptions
@@ -378,7 +379,7 @@ def _load_cache() -> tuple[float, list[ProxyInfo]] | None:
 
 
 def _save_cache(proxies: list[ProxyInfo]) -> None:
-    os.makedirs(os.path.dirname(_PROXY_CACHE_PATH), exist_ok=True)
+    Path(_PROXY_CACHE_PATH).parent.mkdir(parents=True, exist_ok=True)
     tmp = f"{_PROXY_CACHE_PATH}.tmp"
     data = {
         "cached_at": time.time(),

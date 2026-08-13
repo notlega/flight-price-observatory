@@ -3,8 +3,8 @@
 import asyncio
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import aiosqlite
 
@@ -69,9 +69,9 @@ class SearchRepository:
 
     async def open(self):
         """Open the database connection and start the writer loop."""
-        db_dir = os.path.dirname(self._db_path)
+        db_dir = Path(self._db_path).parent
         if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
+            db_dir.mkdir(parents=True, exist_ok=True)
         conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         self._conn = conn
         await conn.execute("PRAGMA journal_mode=WAL")
@@ -241,10 +241,10 @@ class SearchRepository:
     async def delete_db(self):
         await self.close()
         for path in (
-            self._db_path,
-            f"{self._db_path}-shm",
-            f"{self._db_path}-wal",
+            Path(self._db_path),
+            Path(f"{self._db_path}-shm"),
+            Path(f"{self._db_path}-wal"),
         ):
-            if os.path.exists(path):
-                os.remove(path)
+            if path.exists():
+                path.unlink()
         logger.info("Deleted SQLite state: %s", self._db_path)

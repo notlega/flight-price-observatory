@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-lint = "collector._lint:main"
+lint = "scripts.lint:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13"]
