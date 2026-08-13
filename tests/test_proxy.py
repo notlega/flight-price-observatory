@@ -8,6 +8,7 @@ from curl_cffi.requests import exceptions as curl_exceptions
 from collector.models.proxy import ProxyInfo
 from collector.proxy import (
     ProxyRotator,
+    _build_sources,
     _extract_ip,
     _load_cache,
     _normalise_url,
@@ -151,6 +152,11 @@ async def test_parse_source_mixed_lines():
 async def test_parse_source_http_error_returns_empty():
     proxies = await _parse_source("http", "https://s", _fake_client(status=500))
     assert proxies == []
+
+
+def test_build_sources_no_duplicate_urls():
+    urls = [url for _, url in _build_sources()]
+    assert len(urls) == len(set(urls))
 
 
 async def test_parse_all_sources_dedups_and_caps():

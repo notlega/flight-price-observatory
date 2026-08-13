@@ -66,8 +66,26 @@ def _build_sources() -> list[tuple[str, str]]:
         sources.append(
             (p, f"{gh}Thordata/awesome-free-proxy-list/main/proxies/{p}.txt")
         )
+        sources.append(
+            (p, f"{gh}ErcinDedeoglu/proxies/main/proxies/{p}.txt")
+        )
+    for p in ("http", "socks4", "socks5"):
+        sources.append((p, f"{gh}monosans/proxy-list/main/proxies/{p}.txt"))
     for p in ("http", "socks4", "socks5"):
         sources.append((p, f"{gh}TheSpeedX/PROXY-List/master/{p}.txt"))
+    sources.append(("http", f"{gh}r00tee/Proxy-List/main/Https.txt"))
+    sources.append(("socks4", f"{gh}r00tee/Proxy-List/main/Socks4.txt"))
+    sources.append(("socks5", f"{gh}r00tee/Proxy-List/main/Socks5.txt"))
+    for p in protocols:
+        sources.append(
+            (
+                p,
+                f"https://api.proxyscrape.com/v2/?request=getproxies&protocol={p}&timeout=10000",
+            )
+        )
+    sources.append(("http", "https://proxyspace.pro/http.txt"))
+    sources.append(("https", "https://proxyspace.pro/https.txt"))
+    sources.append(("http", "https://openproxylist.xyz/http.txt"))
     return sources
 
 
