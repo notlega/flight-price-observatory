@@ -10,6 +10,8 @@ from curl_cffi.requests import exceptions as curl_exceptions
 from collector.models.proxy import ProxyInfo
 from collector.proxy import (
     ProxyRotator,
+    _CACHE_FRESH_TTL,
+    _CACHE_MAX_AGE,
     _build_sources,
     _extract_ip,
     _load_cache,
@@ -52,6 +54,27 @@ def test_normalise_url_rejects_out_of_range_port(raw):
 
 def test_normalise_url_rejects_empty_host():
     assert _normalise_url("http", ":8080") is None
+
+
+@pytest.mark.parametrize("port", [1, 65535])
+def test_normalise_url_accepts_port_boundaries(port):
+    assert _normalise_url("http", f"1.2.3.4:{port}") == f"http://1.2.3.4:{port}"
+
+
+def test_normalise_url_rejects_invalid_protocol_arg():
+    assert _normalise_url("ftp", "1.2.3.4:80") is None
+
+
+def test_normalise_url_rejects_slash_only():
+    assert _normalise_url("http", "http:///") is None
+
+
+def test_normalise_url_rejects_unclosed_ipv6_bracket():
+    assert _normalise_url("http", "[::1:8080") is None
+
+
+def test_normalise_url_rejects_embedded_colon_port():
+    assert _normalise_url("http", "1.2.3.4:8080:extra") is None
 
 
 def test_proxy_roundtrip_dict():
@@ -99,6 +122,22 @@ def test_extract_ip_from_plain_text():
 
 def test_extract_ip_rejects_non_ip_body():
     assert _extract_ip("<html>attention required</html>") is None
+
+
+def test_extract_ip_rejects_out_of_range_octets():
+    assert _extract_ip("999.1.1.1") is None
+
+
+def test_extract_ip_splits_comma_joined_origin():
+    assert _extract_ip('{"origin": "1.2.3.4, 5.6.7.8"}') == "1.2.3.4"
+
+
+def test_extract_ip_json_list_not_dict():
+    assert _extract_ip('["1.2.3.4"]') == "1.2.3.4"
+
+
+def test_extract_ip_ipv6_via_json():
+    assert _extract_ip('{"origin": "::1"}') == "::1"
 
 
 async def test_probe_url_rejects_transparent_proxy():
@@ -369,6 +408,17 @@ async def test_validate_zero_max_concurrent_processes_all():
 async def test_validate_empty_input_returns_empty():
     rot = ProxyRotator()
     assert await rot._validate([]) == []
+
+
+async def test_validate_prefilter_kills_all_returns_empty():
+    rot = ProxyRotator()
+    proxies = [make_proxy(url="http://0:1"), make_proxy(url="http://1:1")]
+    with (
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: []),
+        patch("collector.proxy._validate_proxy"),
+    ):
+        valid = await rot._validate(proxies)
+    assert valid == []
 
 
 async def test_validate_prefilter_drops_dead_tcp():
@@ -1047,6 +1097,97 @@ async def test_blacklist_expiry_readmits_proxy():
         await rot.refresh(force=False)
     assert [p.url for p in rot._proxies] == ["http://bad:1"]
     assert rot._blacklist == {}
+    fetch.assert_not_called()
+
+
+async def test_refresh_stale_cache_revalidates_successfully():
+    rot = ProxyRotator()
+    cached = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
+    with (
+        patch(
+            "collector.proxy._load_cache",
+            return_value=(time.time() - (_CACHE_FRESH_TTL + 60), cached),
+        ),
+        patch.object(
+            rot,
+            "_validate",
+            new=AsyncMock(side_effect=lambda proxies, **kw: proxies),
+        ),
+        patch("collector.proxy._parse_all_sources") as fetch,
+        patch("collector.proxy._save_cache"),
+    ):
+        await rot.refresh(force=False)
+    assert [p.url for p in rot._proxies] == ["http://a:1", "http://b:2"]
+    fetch.assert_not_called()
+
+
+async def test_refresh_all_sources_empty_keeps_existing_pool():
+    rot = ProxyRotator()
+    existing = [make_proxy(url="http://keep:1")]
+    await rot._set_pool(existing)
+    with (
+        patch("collector.proxy._load_cache", return_value=None),
+        patch("collector.proxy._parse_all_sources", return_value=[]),
+    ):
+        await rot.refresh(force=False)
+    assert [p.url for p in rot._proxies] == ["http://keep:1"]
+    assert rot.working_count() == 1
+
+
+async def test_refresh_cache_stale_at_exact_ttl_boundary():
+    rot = ProxyRotator()
+    cached = [make_proxy(url="http://a:1")]
+    with (
+        patch(
+            "collector.proxy._load_cache",
+            return_value=(time.time() - _CACHE_FRESH_TTL, cached),
+        ),
+        patch.object(
+            rot,
+            "_validate",
+            new=AsyncMock(side_effect=lambda proxies, **kw: proxies),
+        ),
+        patch("collector.proxy._parse_all_sources") as fetch,
+        patch("collector.proxy._save_cache"),
+    ):
+        await rot.refresh(force=False)
+    assert rot.working_count() == 1
+    fetch.assert_not_called()
+
+
+async def test_refresh_cache_expired_at_max_age_fetches_fresh():
+    rot = ProxyRotator()
+    cached = [make_proxy(url="http://a:1")]
+    with (
+        patch(
+            "collector.proxy._load_cache",
+            return_value=(time.time() - _CACHE_MAX_AGE, cached),
+        ),
+        patch.object(
+            rot,
+            "_validate",
+            new=AsyncMock(side_effect=lambda proxies, **kw: proxies),
+        ),
+        patch("collector.proxy._parse_all_sources", return_value=cached),
+        patch("collector.proxy._save_cache"),
+    ):
+        await rot.refresh(force=False)
+    assert rot.working_count() == 1
+
+
+async def test_refresh_cache_fresh_not_replaced_when_smaller():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url="http://big:1"), make_proxy(url="http://big:2")])
+    cached = [make_proxy(url="http://small:1")]
+    with (
+        patch(
+            "collector.proxy._load_cache",
+            return_value=(time.time() - 10, cached),
+        ),
+        patch("collector.proxy._parse_all_sources") as fetch,
+    ):
+        await rot.refresh(force=False)
+    assert [p.url for p in rot._proxies] == ["http://big:1", "http://big:2"]
     fetch.assert_not_called()
 
 

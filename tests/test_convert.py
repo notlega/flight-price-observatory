@@ -74,6 +74,17 @@ async def test_convert_empty_db_writes_nothing(tmp_path):
     assert not os.path.exists(out)
 
 
+async def test_convert_empty_db_delete_true_removes_state(tmp_path):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    await repo.close()
+    assert os.path.exists(db)
+    out = str(tmp_path / "out.jsonl")
+    await convert(db, out, delete=True)
+    assert not os.path.exists(db)
+
+
 async def test_convert_null_flights_exports_empty_array(tmp_path):
     db = str(tmp_path / "state.db")
     repo = SearchRepository(db)

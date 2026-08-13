@@ -1,5 +1,6 @@
 import asyncio
 import time
+from collections import deque
 
 import pytest
 
@@ -68,6 +69,41 @@ async def test_concurrent_acquire_respects_rate():
     await asyncio.gather(*[rl.acquire() for _ in range(100)])
     elapsed = time.monotonic() - t0
     assert elapsed >= 1.0
+
+
+async def test_429_window_prunes_old_timestamps():
+    rl = RateLimiter(max_rate=4)
+    old = time.monotonic() - 120
+    rl._429_times.extend([old] * 10)
+    await rl.report_429()
+    assert all(t >= time.monotonic() - 31 for t in rl._429_times)
+
+
+async def test_429_backoff_only_above_threshold():
+    rl = RateLimiter(max_rate=4)
+    for _ in range(int(30 * 4 * 0.2)):
+        await rl.report_429()
+    assert rl.rate == 4.0
+    await rl.report_429()
+    assert rl.rate < 4.0
+
+
+async def test_report_success_prunes_old_timestamps():
+    rl = RateLimiter(max_rate=4)
+    rl.rate = 2.0
+    rl._429_times.extend([time.monotonic() - 120] * 25)
+    await rl.report_success()
+    assert rl.rate == 4.0
+    assert rl._429_times == deque()
+
+
+async def test_acquire_after_long_idle_caps_burst_at_rate():
+    rl = RateLimiter(max_rate=3)
+    rl.refill_at = time.monotonic() - 3600
+    rl.tokens = 0.0
+    for _ in range(3):
+        await rl.acquire()
+    assert rl.tokens < 3
 
 
 @pytest.mark.parametrize(

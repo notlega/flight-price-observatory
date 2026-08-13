@@ -5,6 +5,12 @@ from collector.repository import SearchRepository, _RETRY_ERROR_TYPES
 from collector.services.search_pipeline import _MAX_ATTEMPTS
 
 
+async def test_empty_db_queries_return_defaults(repo):
+    assert await repo.get_failed(max_retries=3) == []
+    assert await repo.count_status() == (0, 0)
+    assert await repo.count_by_error() == []
+
+
 async def test_upsert_flush_counts(repo):
     await repo.upsert(
         "SIN|KUL",
