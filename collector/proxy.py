@@ -40,6 +40,8 @@ _RATE_LIMIT_COOLDOWN = 60
 _MAX_429_EVICTIONS = 3
 _REFILL_THRESHOLD = 20
 _FORCE_REFETCH_COOLDOWN = 30 * 60
+_EMPTY_REFETCH_COOLDOWN = 60
+_AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
 
@@ -354,6 +356,7 @@ class ProxyRotator:
         self._refresh_task: asyncio.Task | None = None
         self._schedule_lock = asyncio.Lock()
         self._last_force_refresh = float("-inf")
+        self._last_auto_refresh = float("-inf")
         self._blacklist: dict[str, float] = {}
 
     async def _validate(
@@ -444,13 +447,14 @@ class ProxyRotator:
                 age = time.time() - cached_at
                 if age < _CACHE_FRESH_TTL:
                     excluded = self._active_blacklist()
-                    pool = [p for p in cached_proxies if p.url not in excluded]
-                    await self._set_pool(pool)
+                    filtered = [p for p in cached_proxies if p.url not in excluded]
+                    if len(filtered) > self.working_count():
+                        await self._set_pool(filtered)
                     logger.info(
                         "Proxy cache fresh (%.0fs old): %d proxies (%d blacklisted)",
                         age,
-                        len(pool),
-                        len(cached_proxies) - len(pool),
+                        len(filtered),
+                        len(cached_proxies) - len(filtered),
                     )
                     return
                 if age < _CACHE_MAX_AGE:
@@ -515,15 +519,22 @@ class ProxyRotator:
 
     async def _auto_refresh(self):
         try:
+            now = time.monotonic()
+            if now - self._last_auto_refresh < _AUTO_REFRESH_GAP:
+                return
+            self._last_auto_refresh = now
             logger.info("Proxy pool exhausted; auto-refreshing")
             await self.refresh(max_per_source=150)
-            if self.working_count() < _REFILL_THRESHOLD:
-                now = time.monotonic()
-                if now - self._last_force_refresh > _FORCE_REFETCH_COOLDOWN:
+            working = self.working_count()
+            if working < _REFILL_THRESHOLD:
+                cooldown = (
+                    _EMPTY_REFETCH_COOLDOWN if working == 0 else _FORCE_REFETCH_COOLDOWN
+                )
+                if now - self._last_force_refresh > cooldown:
                     self._last_force_refresh = now
                     logger.warning(
                         "Proxy pool low (%d < %d); fetching fresh lists",
-                        self.working_count(),
+                        working,
                         _REFILL_THRESHOLD,
                     )
                     await self.refresh(force=True, max_per_source=150)

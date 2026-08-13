@@ -536,6 +536,65 @@ async def test_auto_refresh_cooldown_blocks_refill():
     assert calls == [{"max_per_source": 150}]
 
 
+async def test_auto_refresh_gap_skips_repeated_attempts():
+    rot = ProxyRotator()
+    rot._last_auto_refresh = time.monotonic()
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == []
+
+
+async def test_auto_refresh_empty_pool_uses_short_cooldown():
+    rot = ProxyRotator()
+    rot._last_force_refresh = time.monotonic() - 61
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("force"):
+            await rot._set_pool([make_proxy(url="http://n:1")])
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert any(c.get("force") for c in calls)
+
+
+async def test_auto_refresh_low_pool_keeps_long_cooldown():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(5)])
+    rot._last_force_refresh = time.monotonic() - 61
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert not any(c.get("force") for c in calls)
+
+
+async def test_cache_fresh_keeps_larger_live_pool():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url=f"http://live{i}:1") for i in range(5)])
+    cached = [make_proxy(url="http://cached:1")]
+    with (
+        patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
+        patch("collector.proxy._parse_all_sources") as fetch,
+    ):
+        await rot.refresh(force=False)
+    assert rot.working_count() == 5
+    assert all(p.url.startswith("http://live") for p in rot._proxies)
+    fetch.assert_not_called()
+
+
 async def test_refresh_uses_fresh_cache():
     rot = ProxyRotator()
     cached = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
