@@ -331,7 +331,10 @@ async def test_run_orchestrates_end_to_end(tmp_path):
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
         patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
+        patch("collector.services.search_pipeline.date") as fake_date,
     ):
+        fake_date.today.return_value = date(2026, 8, 1)
+        fake_date.side_effect = lambda *a, **k: date(*a, **k)
         await pipeline.run(date(2026, 8, 1), date(2026, 8, 1), max_days_ahead=330)
 
     assert repo.inserted == [
@@ -347,6 +350,31 @@ async def test_run_orchestrates_end_to_end(tmp_path):
         ANY,
         delete=True,
     )
+
+
+async def test_run_skips_past_dates(tmp_path):
+    provider = FakeProvider(script=[make_flights(100)] * 4)
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    repo.success_count = 1
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    pipeline.db_path = str(tmp_path / "state.db")
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()),
+        patch("collector.services.search_pipeline.date") as fake_date,
+    ):
+        fake_date.today.return_value = date(2026, 8, 3)
+        fake_date.side_effect = lambda *a, **k: date(*a, **k)
+        await pipeline.run(date(2026, 8, 1), date(2026, 8, 3), max_days_ahead=330)
+    dep = "2026-08-03"
+    assert repo.inserted == [
+        (ROUTE, dep, "", "ONE_WAY", SIN.value, KUL.value),
+        (ROUTE, dep, "2026-08-10", "ROUND_TRIP", SIN.value, KUL.value),
+        (ROUTE, dep, "2026-08-17", "ROUND_TRIP", SIN.value, KUL.value),
+        (ROUTE, dep, "2026-08-24", "ROUND_TRIP", SIN.value, KUL.value),
+    ]
 
 
 def test_ahead_days_from_today_matches_window():

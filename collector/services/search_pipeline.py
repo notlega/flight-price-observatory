@@ -367,6 +367,9 @@ class BulkSearchPipeline:
                 route = _route_key(origin, dest)
                 current = start_date
                 while current <= effective_end:
+                    if current < date.today():
+                        current += timedelta(days=1)
+                        continue
                     ds = current.isoformat()
                     tasks.append(
                         (
@@ -399,6 +402,9 @@ class BulkSearchPipeline:
                 for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
                     current = start_date
                     while current <= effective_end:
+                        if current < date.today():
+                            current += timedelta(days=1)
+                            continue
                         ds = current.isoformat()
                         return_date = (current + timedelta(days=offset)).isoformat()
                         tasks.append(
