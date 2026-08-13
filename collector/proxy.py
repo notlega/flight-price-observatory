@@ -431,9 +431,9 @@ class ProxyRotator:
         if not proxies:
             return []
 
-        logger.info("TCP prefiltering %d proxies", len(proxies))
+        logger.debug("TCP prefiltering %d proxies", len(proxies))
         alive = await _prefilter_tcp(proxies)
-        logger.info("TCP-alive: %d/%d", len(alive), len(proxies))
+        logger.debug("TCP-alive: %d/%d", len(alive), len(proxies))
         if not alive:
             return []
         proxies = alive

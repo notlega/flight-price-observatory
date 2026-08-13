@@ -64,6 +64,7 @@ class BulkSearchPipeline:
         max_concurrent: int = 50,
         db_path: str = "storage/db/search_state.db",
         currency: str = "SGD",
+        keep_db: bool = False,
     ):
         self.providers = providers
         self.rotator = ProxyRotator()
@@ -72,6 +73,7 @@ class BulkSearchPipeline:
         self.repo = SearchRepository(db_path)
         self.db_path = db_path
         self.currency = currency
+        self.keep_db = keep_db
 
     async def _attempt_once(
         self,
@@ -486,7 +488,7 @@ class BulkSearchPipeline:
 
             output_path = default_output_path()
             await self.repo.close()
-            await convert(self.db_path, output_path, delete=True)
+            await convert(self.db_path, output_path, delete=not self.keep_db)
 
             logger.info("Output: %s", output_path)
         finally:

@@ -23,6 +23,7 @@ class CollectorManager:
         rate: float = 200,
         workers: int = 50,
         db_path: str = "storage/db/search_state.db",
+        keep_db: bool = False,
     ):
         """Collect flight prices for all providers over the date range.
 
@@ -34,6 +35,7 @@ class CollectorManager:
             rate: Max requests per second across the pipeline.
             workers: Concurrent search workers.
             db_path: SQLite database path for search state.
+            keep_db: Keep the SQLite state file after JSONL export.
         """
         providers: list[BaseProvider] = [
             provider_class() for provider_class in self._registry.providers.values()
@@ -57,6 +59,7 @@ class CollectorManager:
             max_concurrent=workers,
             db_path=db_path,
             currency=currency,
+            keep_db=keep_db,
         )
         await pipeline.run(
             start_date=start_date,

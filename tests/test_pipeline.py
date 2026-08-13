@@ -410,6 +410,35 @@ async def test_run_orchestrates_end_to_end(tmp_path):
     )
 
 
+async def test_run_keep_db_preserves_state(tmp_path):
+    provider = FakeProvider(script=[make_flights(100)] * 4)
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    repo.success_count = 1
+    pipeline = _make_pipeline(
+        provider=provider,
+        rotator=rotator,
+        repo=repo,
+        keep_db=True,
+    )
+    pipeline.db_path = str(tmp_path / "state.db")
+
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
+        patch("collector.services.search_pipeline.date") as fake_date,
+    ):
+        fake_date.today.return_value = date(2026, 8, 1)
+        fake_date.side_effect = lambda *a, **k: date(*a, **k)
+        await pipeline.run(date(2026, 8, 1), date(2026, 8, 1), max_days_ahead=330)
+
+    convert.assert_awaited_once_with(
+        str(tmp_path / "state.db"),
+        ANY,
+        delete=False,
+    )
+
+
 async def test_run_skips_past_dates(tmp_path):
     provider = FakeProvider(script=[make_flights(100)] * 4)
     rotator = FakeRotator(proxies=[make_proxy()], working=1)

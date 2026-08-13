@@ -1,7 +1,6 @@
 """Convert subcommand: export search DB to JSONL."""
 
 import asyncio
-import logging
 from typing import Any
 
 from collector.convert import convert
@@ -30,9 +29,5 @@ def configure_parser(subparsers: Any):
 
 
 def run(args):
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
     output = asyncio.run(convert(args.db, args.output, delete=not args.keep_db))
     print(f"Output: {output}")

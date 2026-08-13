@@ -1,7 +1,6 @@
 """Search subcommand: run bulk flight price collection."""
 
 import asyncio
-import logging
 from datetime import date, timedelta
 from typing import Any
 
@@ -41,10 +40,9 @@ def configure_parser(subparsers: Any):
         help="Max concurrent searches (default: 50)",
     )
     p.add_argument(
-        "--verbose",
-        "-v",
+        "--keep-db",
         action="store_true",
-        help="Enable debug logging",
+        help="Keep SQLite state file after JSONL export (debug)",
     )
     p.set_defaults(func=run)
 
@@ -54,10 +52,6 @@ def _ahead_days(start: date, end: date) -> int:
 
 
 def run(args):
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
     asyncio.run(_async_run(args))
 
 
@@ -74,4 +68,5 @@ async def _async_run(args):
         currency=args.currency,
         rate=args.rate,
         workers=args.workers,
+        keep_db=args.keep_db,
     )
