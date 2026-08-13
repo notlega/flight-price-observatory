@@ -47,6 +47,8 @@ _REQUEST_TIMEOUT = 30
 
 _FLIGHTS_PAGE_INDEXES = (2, 3)
 
+_BLOCK_MARKERS = ("captcha", "unusual traffic", "attention required", "access denied")
+
 
 def _extract_flights_raw(inner: list) -> list:
     return [
@@ -131,6 +133,11 @@ class GoogleFlightsProvider(BaseProvider):
             raise ProviderRateLimitedError(f"HTTP 429 from {url}")
         if response.status_code >= 500:
             raise ProviderConnectionError(f"HTTP {response.status_code} from {url}")
+        body = response.text.lower()
+        if response.status_code == 403 or any(
+            marker in body for marker in _BLOCK_MARKERS
+        ):
+            raise ProviderRateLimitedError(f"HTTP {response.status_code} block from {url}")
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
@@ -237,10 +244,22 @@ class GoogleFlightsProvider(BaseProvider):
                     return []
                 return [self._merge_round_trip(out, rt) for rt in inbound]
 
-            results = await asyncio.gather(*(expand(o) for o in selected))
+            results = await asyncio.gather(
+                *(expand(o) for o in selected), return_exceptions=True
+            )
 
-            combos = [r for batch in results for r in batch]
+            combos: list[FlightResult] = []
+            first_error: BaseException | None = None
+            for result in results:
+                if isinstance(result, BaseException):
+                    if first_error is None:
+                        first_error = result
+                    logger.debug("Round-trip expand failed: %s", result)
+                    continue
+                combos.extend(result)
             if not combos:
+                if first_error is not None:
+                    raise first_error
                 return None
             return [c.model_dump(mode="json") for c in combos]
         finally:
