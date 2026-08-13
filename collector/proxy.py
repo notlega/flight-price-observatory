@@ -38,6 +38,8 @@ _VALIDATE_TARGET = 100
 
 _RATE_LIMIT_COOLDOWN = 60
 _MAX_429_EVICTIONS = 3
+_REFILL_THRESHOLD = 20
+_FORCE_REFETCH_COOLDOWN = 30 * 60
 
 
 def _build_sources() -> list[tuple[str, str]]:
@@ -349,6 +351,7 @@ class ProxyRotator:
         self._weight_pool_len = 0
         self._refresh_task: asyncio.Task | None = None
         self._schedule_lock = asyncio.Lock()
+        self._last_force_refresh = 0.0
 
     async def _validate(
         self, proxies: list[ProxyInfo], target: int | None = None
@@ -508,9 +511,16 @@ class ProxyRotator:
         try:
             logger.info("Proxy pool exhausted; auto-refreshing")
             await self.refresh(max_per_source=150)
-            if self.working_count() == 0:
-                logger.warning("Cache path yielded no working proxies; fetching fresh")
-                await self.refresh(force=True, max_per_source=150)
+            if self.working_count() < _REFILL_THRESHOLD:
+                now = time.monotonic()
+                if now - self._last_force_refresh > _FORCE_REFETCH_COOLDOWN:
+                    self._last_force_refresh = now
+                    logger.warning(
+                        "Proxy pool low (%d < %d); fetching fresh lists",
+                        self.working_count(),
+                        _REFILL_THRESHOLD,
+                    )
+                    await self.refresh(force=True, max_per_source=150)
         except Exception:
             logger.exception("Proxy auto-refresh failed")
         finally:

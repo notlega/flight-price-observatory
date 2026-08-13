@@ -448,13 +448,15 @@ async def test_auto_refresh_prefers_cache():
     async def fake_refresh(**kwargs):
         calls.append(kwargs)
         if not kwargs.get("force"):
-            await rot._set_pool([make_proxy(url="http://a:1")])
+            await rot._set_pool(
+                [make_proxy(url=f"http://p{i}:1") for i in range(20)]
+            )
 
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
     assert calls == [{"max_per_source": 150}]
-    assert rot.working_count() == 1
+    assert rot.working_count() == 20
 
 
 async def test_auto_refresh_falls_back_when_cache_dead():
@@ -474,6 +476,63 @@ async def test_auto_refresh_falls_back_when_cache_dead():
         {"force": True, "max_per_source": 150},
     ]
     assert rot.working_count() == 1
+
+
+async def test_auto_refresh_refills_when_pool_below_threshold():
+    rot = ProxyRotator()
+    await rot._set_pool(
+        [make_proxy(url=f"http://p{i}:1") for i in range(15)]
+    )
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("force"):
+            await rot._set_pool(
+                [make_proxy(url=f"http://n{i}:1") for i in range(22)]
+            )
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [
+        {"max_per_source": 150},
+        {"force": True, "max_per_source": 150},
+    ]
+    assert rot.working_count() == 22
+
+
+async def test_auto_refresh_skips_refill_when_pool_ok():
+    rot = ProxyRotator()
+    await rot._set_pool(
+        [make_proxy(url=f"http://p{i}:1") for i in range(25)]
+    )
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [{"max_per_source": 150}]
+
+
+async def test_auto_refresh_cooldown_blocks_refill():
+    rot = ProxyRotator()
+    await rot._set_pool(
+        [make_proxy(url=f"http://p{i}:1") for i in range(15)]
+    )
+    rot._last_force_refresh = time.monotonic()
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [{"max_per_source": 150}]
 
 
 async def test_refresh_uses_fresh_cache():
