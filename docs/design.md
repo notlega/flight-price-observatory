@@ -12,9 +12,16 @@
 ## Retry semantics
 
 - 3 retry rounds.
-- Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderTimeoutError`, `ProviderConnectionError`, `no_proxy`.
-- `ProviderDataError` marks data bad; not worth retrying.
+- Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderTimeoutError`, `ProviderConnectionError`, `ProviderDataError`, `no_proxy`. Data errors may be transient (e.g. parse hiccups) so they are retried, but they never trigger proxy `report_failure`.
+- `ProviderDataError` marks data bad; only `Timeout`/`Connection` errors blame (remove + blacklist) the proxy.
+- Past-departure failures are skipped entirely — once `dep_date < today` no amount of retries can succeed. Build-time already skips past dates; retry skips them too.
 - Failed routes rejected from retry once retry count >= 3, except 429 which is always re-queued to the next round.
+
+## Midnight rollover contract
+
+- A run that starts before midnight builds tasks for "today". At 00:00 those dates become invalid: the provider maps the validation failure to `ProviderDataError` (no proxy blame, no blacklist churn) and the failure is recorded as `DATA`.
+- Any rebuild after rollover emits only future dates (both one-way and round-trip) — past dates are invalid and cannot be searched.
+- Rationale: correctness over completeness. Losing up to a day of "today" tasks at the boundary is cheaper than blacklisting healthy proxies.
 
 ## Testing strategy
 
