@@ -13,7 +13,11 @@ from collector.errors import (
     ProviderTimeoutError,
 )
 from collector.models import FlightType
-from collector.services.search_pipeline import BulkSearchPipeline, _MAX_ATTEMPTS
+from collector.services.search_pipeline import (
+    BulkSearchPipeline,
+    _MAX_ATTEMPTS,
+    _MIN_POOL_BEFORE_RETRY,
+)
 
 from tests.libs.factories import make_flights, make_proxy
 from tests.libs.fakes import FakeCurlSession, FakeProvider, FakeRepo, FakeRotator
@@ -346,6 +350,23 @@ async def test_retry_loop_refreshes_when_pool_low():
     assert repo.upserts[-1]["success"] is True
 
 
+@pytest.mark.parametrize("working", [19, 20])
+async def test_retry_loop_refresh_threshold_boundary(working):
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[make_proxy()], working=working)
+    repo = FakeRepo()
+    repo.failed = [("X|Y", "2000-01-01", "", "ONE_WAY")]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._retry_loop(rounds=1)
+    if working < _MIN_POOL_BEFORE_RETRY:
+        assert rotator.refreshes
+    else:
+        assert rotator.refreshes == []
+
+
 async def test_retry_loop_stops_when_nothing_failed():
     pipeline = _make_pipeline(repo=FakeRepo())
     await pipeline._retry_loop(rounds=3)
@@ -513,3 +534,20 @@ def test_ahead_days_from_today_matches_window():
     assert _ahead_days(today + timedelta(days=2)) == 2
     assert _ahead_days(today + timedelta(days=12)) == 12
     assert _ahead_days(today - timedelta(days=3)) == 0
+
+
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [
+        (0, "0s"),
+        (45, "45s"),
+        (70, "1m10s"),
+        (300, "5m00s"),
+        (3729.5, "1h02m"),
+        (7200, "2h00m"),
+    ],
+)
+def test_format_duration(seconds, expected):
+    from collector.services.search_pipeline import _format_duration
+
+    assert _format_duration(seconds) == expected

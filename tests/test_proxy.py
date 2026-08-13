@@ -165,6 +165,53 @@ async def test_probe_url_rejects_http_error():
     assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
 
 
+async def test_probe_url_returns_latency_on_success():
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=FakeResponse(200, "1.2.3.4"))
+    with patch("collector.proxy._REAL_IP", "9.9.9.9"):
+        latency = await _probe_url("http://a:1", "https://u", session, 5.0)
+    assert latency is not None
+    assert latency >= 0
+
+
+async def test_probe_url_rejects_block_marker():
+    session = AsyncMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(200, "attention required 1.2.3.4")
+    )
+    assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        curl_exceptions.ProxyError("proxy"),
+        curl_exceptions.SSLError("tls"),
+        curl_exceptions.ConnectionError("conn"),
+        RuntimeError("boom"),
+    ],
+)
+async def test_probe_url_failure_handlers(exc):
+    session = AsyncMock()
+    session.get = AsyncMock(side_effect=exc)
+    assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+@pytest.mark.parametrize("status", [407, 429])
+async def test_probe_url_rejects_auth_and_rate_limited(status):
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=FakeResponse(status, "1.2.3.4"))
+    assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+async def test_echo_uses_median_with_even_probes():
+    with patch(
+        "collector.proxy._probe_url",
+        side_effect=[100.0, 300.0],
+    ):
+        assert await _test_http_echo("http://a:1", AsyncMock()) == 300.0
+
+
 async def test_echo_requires_two_probes():
     with patch(
         "collector.proxy._probe_url",
@@ -488,6 +535,36 @@ async def test_save_load_cache_roundtrip(tmp_path):
 async def test_load_cache_missing_file_returns_none(tmp_path):
     with patch("collector.proxy._PROXY_CACHE_PATH", str(tmp_path / "absent.json")):
         assert _load_cache() is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{not json",
+        '{"proxies": []}',
+        '{"cached_at": "soon", "proxies": [{"url": "http://a:1"}]}',
+        '{"cached_at": 123, "proxies": "oops"}',
+    ],
+)
+def test_load_cache_corrupt_payload_returns_none(tmp_path, payload):
+    path = tmp_path / "cache.json"
+    path.write_text(payload)
+    with patch("collector.proxy._PROXY_CACHE_PATH", str(path)):
+        assert _load_cache() is None
+
+
+def test_save_cache_write_failure_propagates(tmp_path):
+    d = tmp_path / "ro"
+    d.mkdir()
+    d.chmod(0o500)
+    try:
+        with (
+            patch("collector.proxy._PROXY_CACHE_PATH", str(d / "cache.json")),
+            pytest.raises(OSError),
+        ):
+            _save_cache([make_proxy(url="http://a:1")])
+    finally:
+        d.chmod(0o700)
 
 
 async def test_rotator_returns_none_when_empty():
@@ -1177,7 +1254,9 @@ async def test_refresh_cache_expired_at_max_age_fetches_fresh():
 
 async def test_refresh_cache_fresh_not_replaced_when_smaller():
     rot = ProxyRotator()
-    await rot._set_pool([make_proxy(url="http://big:1"), make_proxy(url="http://big:2")])
+    await rot._set_pool(
+        [make_proxy(url="http://big:1"), make_proxy(url="http://big:2")]
+    )
     cached = [make_proxy(url="http://small:1")]
     with (
         patch(

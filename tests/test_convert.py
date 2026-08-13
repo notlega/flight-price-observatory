@@ -85,6 +85,35 @@ async def test_convert_empty_db_delete_true_removes_state(tmp_path):
     assert not os.path.exists(db)
 
 
+@pytest.mark.parametrize("n", [999, 1000, 1001])
+async def test_convert_flushes_buffer_at_boundary(tmp_path, n):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    for i in range(n):
+        await repo.upsert(
+            f"SIN|KUL{i:04d}",
+            "2026-08-01",
+            "",
+            "ONE_WAY",
+            "SIN",
+            f"KUL{i:04d}",
+            [{"price": i}],
+            None,
+            0,
+            True,
+            f"t{i}",
+        )
+    await repo.flush()
+    await repo.close()
+
+    out = str(tmp_path / "out.jsonl")
+    await convert(db, out, delete=True)
+    with open(out) as f:
+        lines = [line for line in f if line.strip()]
+    assert len(lines) == n
+
+
 async def test_convert_null_flights_exports_empty_array(tmp_path):
     db = str(tmp_path / "state.db")
     repo = SearchRepository(db)

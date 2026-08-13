@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, cast
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from curl_cffi import requests
@@ -15,7 +15,10 @@ from collector.errors import (
     ProviderRateLimitedError,
     ProviderTimeoutError,
 )
-from collector.providers.google_flights.provider import GoogleFlightsProvider
+from collector.providers.google_flights.provider import (
+    GoogleFlightsProvider,
+    _parse_flights,
+)
 
 from tests.libs.fakes import FakeResponse, FakeSession, FakeSessionFactory
 
@@ -264,6 +267,45 @@ async def test_search_returns_none_when_no_flights_parsed():
         ),
     ):
         assert await _search(session) is None
+
+
+@pytest.mark.parametrize(
+    "inner",
+    [
+        [[], []],
+        [[], [], [5]],
+    ],
+)
+async def test_search_returns_none_when_malformed_wrb(inner):
+    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+    with patch(
+        "collector.providers.google_flights.provider.parse_first_wrb_payload",
+        return_value=inner,
+    ):
+        assert await _search(session) is None
+
+
+def test_parse_flights_keeps_valid_rows_drops_bad():
+    def fake_parse(row):
+        if row == "bad":
+            raise ValueError("nope")
+        return row
+
+    with patch(
+        "collector.providers.google_flights.provider.parse_flight_row",
+        side_effect=fake_parse,
+    ):
+        assert _parse_flights(["good", "bad", "good2"]) == ["good", "good2"]
+
+
+async def test_search_generic_exception_escapes_as_other():
+    session = FakeSession()
+    session.post = cast(
+        Any,
+        AsyncMock(side_effect=requests.exceptions.RequestException("boom")),
+    )
+    with pytest.raises(requests.exceptions.RequestException):
+        await _search(session)
 
 
 async def test_search_requires_proxy():
