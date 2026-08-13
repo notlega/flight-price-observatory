@@ -310,7 +310,7 @@ class BulkSearchPipeline:
                         done += 1
                         log_progress()
 
-        n_workers = min(self.max_concurrent, max(total, 1))
+        n_workers = min(max(self.max_concurrent, 1), max(total, 1))
         workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
         await asyncio.gather(*workers)
         log_progress(final=True)

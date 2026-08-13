@@ -348,6 +348,29 @@ async def test_validate_early_exit_hits_target():
     assert len(valid) == 2
 
 
+async def test_validate_zero_max_concurrent_processes_all():
+    proxies = [make_proxy(url=f"http://{i}:1") for i in range(3)]
+    rot = ProxyRotator(max_concurrent=0)
+
+    async def fake_validate(proxy, session):
+        proxy.quality_score = 1.3
+        return proxy
+
+    with (
+        patch("collector.proxy._validate_proxy", side_effect=fake_validate),
+        patch("collector.proxy.AsyncSession", new=FakeCurlSession),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
+    ):
+        valid = await rot._validate(proxies)
+
+    assert [p.url for p in valid] == ["http://0:1", "http://1:1", "http://2:1"]
+
+
+async def test_validate_empty_input_returns_empty():
+    rot = ProxyRotator()
+    assert await rot._validate([]) == []
+
+
 async def test_validate_prefilter_drops_dead_tcp():
     proxies = [make_proxy(url=f"http://{i}:1") for i in range(4)]
     rot = ProxyRotator(max_concurrent=2)
@@ -515,6 +538,17 @@ async def test_report_rate_limited_evicts_after_threshold():
     assert rot.working_count() == 1
     assert rot._proxies[0].url == "http://b:2"
     assert rot._blacklist["http://a:1"] > time.monotonic()
+
+
+async def test_report_rate_limited_after_eviction_ignored():
+    rot = ProxyRotator()
+    rot._proxies = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
+    victim = rot._proxies[0]
+    for _ in range(3):
+        await rot.report_rate_limited(victim, seconds=60)
+    assert victim not in rot._proxies
+    await rot.report_rate_limited(victim, seconds=60)
+    assert rot.working_count() == 1
 
 
 async def test_report_rate_limited_count_roundtrips_cache(tmp_path):

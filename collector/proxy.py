@@ -473,7 +473,7 @@ class ProxyRotator:
                             )
                             next_log_pct = pct + 10
 
-        n_workers = min(self._max_concurrent, max(len(proxies), 1))
+        n_workers = min(max(self._max_concurrent, 1), max(len(proxies), 1))
         for _ in range(n_workers):
             queue.put_nowait(None)
         workers = [asyncio.create_task(worker()) for _ in range(n_workers)]

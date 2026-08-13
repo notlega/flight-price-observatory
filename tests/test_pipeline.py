@@ -268,6 +268,47 @@ async def test_run_batch_records_unexpected_failure():
     assert pipeline.repo.upserts[-1]["success"] is False
 
 
+async def test_run_batch_zero_max_concurrent_processes_all():
+    provider = FakeProvider(script=[make_flights(100)] * 3)
+    pipeline = _make_pipeline(provider=provider, max_concurrent=0)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._run_batch(
+            [
+                (provider, SIN, KUL, DEP, None, FlightType.ONE_WAY.value),
+                (provider, SIN, KUL, DEP, "2026-08-08", FlightType.ROUND_TRIP.value),
+                (provider, SIN, KUL, DEP, "2026-08-15", FlightType.ROUND_TRIP.value),
+            ],
+            "test",
+        )
+    assert len(pipeline.repo.upserts) == 3
+    assert all(r["success"] is True for r in pipeline.repo.upserts)
+
+
+async def test_retry_loop_escalates_max_retries_with_round():
+    provider = FakeProvider(script=[make_flights(100)])
+    repo = FakeRepo()
+    repo.failed = [("X|Y", "2000-01-01", "", "ONE_WAY")]
+    calls: list[int] = []
+
+    async def recording_get_failed(max_retries=3):
+        calls.append(max_retries)
+        return repo.failed
+
+    repo.get_failed = recording_get_failed  # type: ignore[method-assign]
+    pipeline = _make_pipeline(provider=provider, repo=repo)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._retry_loop(rounds=3)
+    assert calls == [
+        1 * _MAX_ATTEMPTS,
+        2 * _MAX_ATTEMPTS,
+        3 * _MAX_ATTEMPTS,
+    ]
+
+
 async def test_retry_loop_refreshes_when_pool_low():
     provider = FakeProvider(script=[make_flights(100)])
     rotator = FakeRotator(proxies=[make_proxy()], working=0)

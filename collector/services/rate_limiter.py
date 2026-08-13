@@ -16,6 +16,12 @@ _RATE_RECOVERY = 2.0
 
 class RateLimiter:
     def __init__(self, max_rate: float = 8, min_rate: float = 0.5):
+        if max_rate <= 0:
+            raise ValueError("max_rate must be > 0")
+        if min_rate <= 0:
+            raise ValueError("min_rate must be > 0")
+        if min_rate > max_rate:
+            raise ValueError("min_rate cannot exceed max_rate")
         self.rate = max_rate
         self.max_rate = max_rate
         self.min_rate = min_rate

@@ -6,6 +6,26 @@ import pytest
 from collector.services.rate_limiter import RateLimiter
 
 
+def test_zero_max_rate_rejected():
+    with pytest.raises(ValueError, match="max_rate"):
+        RateLimiter(max_rate=0)
+
+
+def test_negative_max_rate_rejected():
+    with pytest.raises(ValueError, match="max_rate"):
+        RateLimiter(max_rate=-5)
+
+
+def test_zero_min_rate_rejected():
+    with pytest.raises(ValueError, match="min_rate"):
+        RateLimiter(max_rate=8, min_rate=0)
+
+
+def test_min_rate_above_max_rate_rejected():
+    with pytest.raises(ValueError, match="min_rate cannot exceed"):
+        RateLimiter(max_rate=2, min_rate=8)
+
+
 async def test_initial_burst_allows_rate_tokens():
     rl = RateLimiter(max_rate=10)
     for _ in range(10):
