@@ -329,6 +329,26 @@ async def test_report_rate_limited_parks_proxy_and_skips_it():
     assert "http://b:2" in {p.url for p in picks}
 
 
+async def test_report_rate_limited_evicts_after_threshold():
+    rot = ProxyRotator()
+    rot._proxies = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
+    victim = rot._proxies[0]
+    for _ in range(3):
+        await rot.report_rate_limited(victim, seconds=60)
+    assert rot.working_count() == 1
+    assert rot._proxies[0].url == "http://b:2"
+
+
+async def test_report_rate_limited_count_roundtrips_cache(tmp_path):
+    path = tmp_path / "cache.json"
+    with patch("collector.proxy._PROXY_CACHE_PATH", str(path)):
+        p = make_proxy(url="http://a:1", rate_limited_count=2)
+        _save_cache([p])
+        loaded = _load_cache()
+        assert loaded is not None
+        assert loaded[1][0].rate_limited_count == 2
+
+
 async def test_pick_returns_none_when_all_proxies_parked():
     rot = ProxyRotator()
     rot._proxies = [make_proxy(url="http://a:1")]

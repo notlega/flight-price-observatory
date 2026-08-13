@@ -35,6 +35,7 @@ _TCP_FILTER_LIMIT = 500
 _VALIDATE_TARGET = 100
 
 _RATE_LIMIT_COOLDOWN = 60
+_MAX_429_EVICTIONS = 3
 
 
 def _build_sources() -> list[tuple[str, str]]:
@@ -436,12 +437,26 @@ class ProxyRotator:
 
     async def report_rate_limited(self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN):
         async with self._lock:
+            proxy.rate_limited_count += 1
+            if proxy.rate_limited_count >= _MAX_429_EVICTIONS:
+                try:
+                    self._proxies.remove(proxy)
+                    logger.info(
+                        "Evicted proxy %s after %d 429s (%d remaining)",
+                        proxy.url,
+                        proxy.rate_limited_count,
+                        len(self._proxies),
+                    )
+                except ValueError:
+                    pass
+                return
             proxy.rate_limit_until = time.monotonic() + seconds
             self._weight_pool_len = 0
             logger.debug(
-                "Proxy %s rate-limited; parked for %.0fs",
+                "Proxy %s rate-limited; parked for %.0fs (%d/3)",
                 proxy.url,
                 seconds,
+                proxy.rate_limited_count,
             )
 
     def working_count(self) -> int:

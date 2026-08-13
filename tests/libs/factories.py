@@ -7,6 +7,7 @@ def make_proxy(
     quality_score: float = 1.0,
     latency_ms: float = 0.0,
     last_validated: float = 0.0,
+    rate_limited_count: int = 0,
 ) -> ProxyInfo:
     return ProxyInfo(
         url=url,
@@ -14,6 +15,7 @@ def make_proxy(
         quality_score=quality_score,
         latency_ms=latency_ms,
         last_validated=last_validated,
+        rate_limited_count=rate_limited_count,
     )
 
 
