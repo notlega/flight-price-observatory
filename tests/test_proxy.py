@@ -2,21 +2,26 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, Mock, patch
 
+from curl_cffi.requests import exceptions as curl_exceptions
+
 
 from collector.models.proxy import ProxyInfo
 from collector.proxy import (
     ProxyRotator,
+    _extract_ip,
     _load_cache,
     _normalise_url,
     _parse_all_sources,
     _parse_source,
+    _probe_url,
     _save_cache,
     _tcp_alive,
+    _test_http_echo,
     _validate_proxy,
 )
 
 from tests.libs.factories import make_proxy
-from tests.libs.fakes import FakeCurlSession
+from tests.libs.fakes import FakeCurlSession, FakeResponse
 
 
 def test_normalise_url_bare_ip_port():
@@ -64,6 +69,65 @@ async def test_validate_proxy_scores_reflect_latency():
     assert slow is not None
     assert slow.quality_score == 1.1
     assert dead is None
+
+
+def test_extract_ip_from_json_origin():
+    assert _extract_ip('{"origin": "1.2.3.4"}') == "1.2.3.4"
+
+
+def test_extract_ip_from_json_query():
+    assert _extract_ip('{"query": "5.6.7.8"}') == "5.6.7.8"
+
+
+def test_extract_ip_from_plain_text():
+    assert _extract_ip("1.2.3.4\n") == "1.2.3.4"
+
+
+def test_extract_ip_rejects_non_ip_body():
+    assert _extract_ip("<html>attention required</html>") is None
+
+
+async def test_probe_url_rejects_transparent_proxy():
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=FakeResponse(200, "9.9.9.9"))
+    with patch("collector.proxy._REAL_IP", "9.9.9.9"):
+        assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+async def test_probe_url_rejects_non_ip_body():
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=FakeResponse(200, "<html>blocked</html>"))
+    assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+async def test_probe_url_rejects_non_200():
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=FakeResponse(403, "1.2.3.4"))
+    assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+async def test_probe_url_rejects_http_error():
+    session = AsyncMock()
+    session.get = AsyncMock(
+        side_effect=curl_exceptions.Timeout("timed out")
+    )
+    assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
+
+
+async def test_echo_requires_two_probes():
+    with patch(
+        "collector.proxy._probe_url",
+        side_effect=[100.0, None, None],
+    ):
+        assert await _test_http_echo("http://a:1", AsyncMock()) == 0.0
+
+
+async def test_echo_uses_median_latency():
+    with patch(
+        "collector.proxy._probe_url",
+        side_effect=[100.0, 700.0, 900.0],
+    ):
+        assert await _test_http_echo("http://a:1", AsyncMock()) == 700.0
 
 
 def _fake_client(body: str = "", status: int = 200) -> AsyncMock:
@@ -126,6 +190,7 @@ async def test_validate_uses_per_worker_sessions():
     with (
         patch("collector.proxy._validate_proxy", side_effect=fake_validate),
         patch("collector.proxy.AsyncSession", factory),
+        patch("collector.proxy._fetch_real_ip", return_value=""),
         patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
     ):
         await rot._validate(proxies)

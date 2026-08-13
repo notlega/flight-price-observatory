@@ -1,13 +1,15 @@
 import asyncio
+import ipaddress
 import json
 import logging
 import os
 import random
+import re
 import time
 from bisect import bisect_left
 
 import httpx
-from curl_cffi.requests import AsyncSession
+from curl_cffi.requests import AsyncSession, exceptions
 from tqdm import tqdm
 
 from collector.models.proxy import ProxyInfo
@@ -137,32 +139,120 @@ async def _parse_all_sources(max_per_source: int = 0) -> list[ProxyInfo]:
     return unique
 
 
+_REAL_IP: str = ""
+
+_BLOCK_MARKERS = ("captcha", "unusual traffic", "attention required", "access denied")
+
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+def _valid_ip(candidate: str) -> bool:
+    try:
+        ipaddress.ip_address(candidate)
+        return True
+    except ValueError:
+        return False
+
+
+def _extract_ip(text: str) -> str | None:
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            for key in ("origin", "ip", "query"):
+                cand = data.get(key)
+                if isinstance(cand, str):
+                    cand = cand.split(",", 1)[0].strip()
+                    if _valid_ip(cand):
+                        return cand
+    except (ValueError, TypeError):
+        pass
+    for m in _IP_RE.finditer(text):
+        if _valid_ip(m.group(0)):
+            return m.group(0)
+    return None
+
+
+async def _fetch_real_ip() -> str:
+    try:
+        async with AsyncSession() as session:
+            r = await session.get("https://api.ipify.org", timeout=5)
+            if r.status_code == 200:
+                return r.text.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _log_probe_status(proxy_url: str, url: str, status: int) -> None:
+    kind = {
+        407: "auth",
+        403: "blocked",
+        429: "rate_limited",
+    }.get(status, f"http_{status}")
+    logger.debug("Proxy %s rejected on %s: %s", proxy_url, url, kind)
+
+
+async def _probe_url(
+    proxy_url: str, url: str, session: AsyncSession, timeout: float
+) -> float | None:
+    t0 = time.monotonic()
+    try:
+        r = await session.get(
+            url,
+            proxies={"all": proxy_url},
+            timeout=timeout,
+        )
+    except exceptions.Timeout:
+        logger.debug("Proxy %s timeout on %s", proxy_url, url)
+        return None
+    except exceptions.ProxyError as e:
+        logger.debug("Proxy %s proxy_error on %s: %s", proxy_url, url, e)
+        return None
+    except exceptions.SSLError as e:
+        logger.debug("Proxy %s tls failure on %s: %s", proxy_url, url, e)
+        return None
+    except exceptions.ConnectionError as e:
+        logger.debug("Proxy %s connect failure on %s: %s", proxy_url, url, e)
+        return None
+    except Exception as e:
+        logger.debug("Proxy %s other failure on %s: %s", proxy_url, url, e)
+        return None
+
+    latency = (time.monotonic() - t0) * 1000
+    status = r.status_code
+    if status != 200:
+        _log_probe_status(proxy_url, url, status)
+        return None
+
+    body = r.text
+    exit_ip = _extract_ip(body)
+    if exit_ip is None:
+        logger.debug("Proxy %s bad echo body on %s", proxy_url, url)
+        return None
+    if _REAL_IP and exit_ip == _REAL_IP:
+        logger.debug("Proxy %s transparent (leaked real IP)", proxy_url)
+        return None
+    lower = body.lower()
+    if any(marker in lower for marker in _BLOCK_MARKERS):
+        logger.debug("Proxy %s block marker on %s", proxy_url, url)
+        return None
+    return latency
+
+
 async def _test_http_echo(
     proxy_url: str,
     session: AsyncSession,
     timeout: float = _HTTP_ECHO_TIMEOUT,
 ) -> float:
-    async def probe(url: str) -> float:
-        t0 = time.monotonic()
-        try:
-            r = await session.get(
-                url,
-                proxies={"all": proxy_url},
-                timeout=timeout,
-            )
-            latency = (time.monotonic() - t0) * 1000
-            if r.status_code == 200:
-                return latency
-        except Exception:
-            pass
-        return 0.0
-
     results = await asyncio.gather(
-        *[probe(u) for u in _TEST_ECHO_URLS],
+        *[_probe_url(proxy_url, u, session, timeout) for u in _TEST_ECHO_URLS],
         return_exceptions=True,
     )
-    latencies = [r for r in results if isinstance(r, float) and r > 0]
-    return min(latencies) if latencies else 0.0
+    latencies = [r for r in results if isinstance(r, float)]
+    if len(latencies) < 2:
+        return 0.0
+    latencies.sort()
+    return latencies[len(latencies) // 2]
 
 
 async def _tcp_alive(url: str, timeout: float = _TCP_TIMEOUT) -> bool:
@@ -272,6 +362,9 @@ class ProxyRotator:
         if not alive:
             return []
         proxies = alive
+
+        global _REAL_IP
+        _REAL_IP = await _fetch_real_ip()
 
         queue: asyncio.Queue[ProxyInfo | None] = asyncio.Queue()
         for p in proxies:
