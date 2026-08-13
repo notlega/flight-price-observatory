@@ -70,7 +70,9 @@ async def test_search_past_date_raises_data_error():
             "2000-01-01",
             currency="SGD",
             proxy_url=PROXY,
-            session=cast(Any, FakeSession(response=FakeResponse(status_code=200, text=""))),
+            session=cast(
+                Any, FakeSession(response=FakeResponse(status_code=200, text=""))
+            ),
         )
 
 
@@ -82,7 +84,9 @@ async def test_search_malformed_date_raises_data_error():
             "2026-99-99",
             currency="SGD",
             proxy_url=PROXY,
-            session=cast(Any, FakeSession(response=FakeResponse(status_code=200, text=""))),
+            session=cast(
+                Any, FakeSession(response=FakeResponse(status_code=200, text=""))
+            ),
         )
 
 
@@ -95,7 +99,9 @@ async def test_search_past_return_date_raises_data_error():
             currency="SGD",
             proxy_url=PROXY,
             return_date="2000-01-01",
-            session=cast(Any, FakeSession(response=FakeResponse(status_code=200, text=""))),
+            session=cast(
+                Any, FakeSession(response=FakeResponse(status_code=200, text=""))
+            ),
         )
 
 
@@ -131,7 +137,9 @@ async def test_search_maps_transport_errors(exc, expected):
         await _search(session)
 
 
-@pytest.mark.parametrize("body", ["captcha", "unusual traffic", "attention required", "access denied"])
+@pytest.mark.parametrize(
+    "body", ["captcha", "unusual traffic", "attention required", "access denied"]
+)
 async def test_search_block_marker_raises_rate_limited(body):
     session = FakeSession(
         response=FakeResponse(status_code=200, text=f"<title>{body}</title>")
@@ -418,7 +426,12 @@ async def test_search_round_trip_raises_when_all_expands_fail():
     with (
         patch(
             "collector.providers.google_flights.provider.parse_first_wrb_payload",
-            side_effect=[payload([100, 200, 300]), payload([30]), payload([30]), payload([30])],
+            side_effect=[
+                payload([100, 200, 300]),
+                payload([30]),
+                payload([30]),
+                payload([30]),
+            ],
         ),
         patch(
             "collector.providers.google_flights.provider.parse_flight_row",
@@ -632,7 +645,12 @@ async def test_search_round_trip_preserves_outbound_order():
     with (
         patch(
             "collector.providers.google_flights.provider.parse_first_wrb_payload",
-            side_effect=[payload([300, 100, 200]), payload([10]), payload([10]), payload([10])],
+            side_effect=[
+                payload([300, 100, 200]),
+                payload([10]),
+                payload([10]),
+                payload([10]),
+            ],
         ),
         patch(
             "collector.providers.google_flights.provider.parse_flight_row",

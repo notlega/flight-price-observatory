@@ -72,9 +72,7 @@ def _build_sources() -> list[tuple[str, str]]:
         sources.append(
             (p, f"{gh}Thordata/awesome-free-proxy-list/main/proxies/{p}.txt")
         )
-        sources.append(
-            (p, f"{gh}ErcinDedeoglu/proxies/main/proxies/{p}.txt")
-        )
+        sources.append((p, f"{gh}ErcinDedeoglu/proxies/main/proxies/{p}.txt"))
     for p in ("http", "socks4", "socks5"):
         sources.append((p, f"{gh}monosans/proxy-list/main/proxies/{p}.txt"))
     for p in ("http", "socks4", "socks5"):
@@ -94,19 +92,13 @@ def _build_sources() -> list[tuple[str, str]]:
     sources.append(("http", "https://openproxylist.xyz/http.txt"))
     for p in protocols:
         sources.append((p, f"{js}hproxy-com/free-proxy-list@main/{p}.txt"))
-        sources.append(
-            (p, f"{js}VMHeaven/VMHeaven-Free-Proxy-Updated@main/{p}.txt")
-        )
+        sources.append((p, f"{js}VMHeaven/VMHeaven-Free-Proxy-Updated@main/{p}.txt"))
     for p in ("http", "socks4", "socks5"):
-        sources.append(
-            (p, f"{js}databay-labs/free-proxy-list@master/{p}.txt")
-        )
+        sources.append((p, f"{js}databay-labs/free-proxy-list@master/{p}.txt"))
         sources.append(
             (p, f"{js}proxygenerator1/ProxyGenerator@main/MostStable/{p}.txt")
         )
-        sources.append(
-            (p, f"{js}ClearProxy/checked-proxy-list@main/{p}/raw/all.txt")
-        )
+        sources.append((p, f"{js}ClearProxy/checked-proxy-list@main/{p}/raw/all.txt"))
     sources.append(
         ("http", f"{js}ClearProxy/checked-proxy-list@main/custom/google/http.txt")
     )
@@ -223,7 +215,7 @@ def _extract_ip(text: str) -> str | None:
                     cand = cand.split(",", 1)[0].strip()
                     if _valid_ip(cand):
                         return cand
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     for m in _IP_RE.finditer(text):
         if _valid_ip(m.group(0)):
@@ -345,9 +337,7 @@ async def _prefilter_tcp(proxies: list[ProxyInfo]) -> list[ProxyInfo]:
     return [p for p, ok in zip(proxies, results) if ok]
 
 
-async def _validate_proxy(
-    proxy: ProxyInfo, session: AsyncSession
-) -> ProxyInfo | None:
+async def _validate_proxy(proxy: ProxyInfo, session: AsyncSession) -> ProxyInfo | None:
     latency = await _test_http_echo(proxy.url, session)
 
     if latency == 0.0:
@@ -375,7 +365,7 @@ def _load_cache() -> tuple[float, list[ProxyInfo]] | None:
         if not proxies:
             return None
         return cached_at, proxies
-    except (OSError, ValueError, TypeError, KeyError):
+    except OSError, ValueError, TypeError, KeyError:
         return None
 
 
@@ -453,9 +443,7 @@ class ProxyRotator:
         n_workers = min(self._max_concurrent, max(len(proxies), 1))
         for _ in range(n_workers):
             queue.put_nowait(None)
-        with tqdm(
-            total=len(proxies), desc="Testing proxies", unit="px"
-        ) as pbar:
+        with tqdm(total=len(proxies), desc="Testing proxies", unit="px") as pbar:
             workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
             await asyncio.gather(*workers)
 
@@ -489,9 +477,7 @@ class ProxyRotator:
             self._cum_weights.append(total)
         self._total_weight = total
 
-    async def refresh(
-        self, force: bool = False, max_per_source: int | None = None
-    ):
+    async def refresh(self, force: bool = False, max_per_source: int | None = None):
         """Repopulate the proxy pool from cache or all sources.
 
         Args:
@@ -626,7 +612,9 @@ class ProxyRotator:
                 pass
             self._blacklist[proxy.url] = time.monotonic() + _DEAD_BLACKLIST_TTL
 
-    async def report_rate_limited(self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN):
+    async def report_rate_limited(
+        self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN
+    ):
         async with self._lock:
             proxy.rate_limited_count += 1
             if proxy.rate_limited_count >= _MAX_429_EVICTIONS:

@@ -43,7 +43,9 @@ def test_normalise_url_rejects_missing_port():
     assert _normalise_url("http", "1.2.3.4") is None
 
 
-@pytest.mark.parametrize("raw", ["1.2.3.4:0", "1.2.3.4:65536", "1.2.3.4:-1", "1.2.3.4:99999"])
+@pytest.mark.parametrize(
+    "raw", ["1.2.3.4:0", "1.2.3.4:65536", "1.2.3.4:-1", "1.2.3.4:99999"]
+)
 def test_normalise_url_rejects_out_of_range_port(raw):
     assert _normalise_url("http", raw) is None
 
@@ -120,9 +122,7 @@ async def test_probe_url_rejects_non_200():
 
 async def test_probe_url_rejects_http_error():
     session = AsyncMock()
-    session.get = AsyncMock(
-        side_effect=curl_exceptions.Timeout("timed out")
-    )
+    session.get = AsyncMock(side_effect=curl_exceptions.Timeout("timed out"))
     assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
 
 
@@ -203,7 +203,9 @@ def test_normalise_url_drops_ipv6():
 
 
 async def test_parse_source_preserves_uppercase_scheme():
-    proxies = await _parse_source("http", "https://s", _fake_client("HTTP://1.2.3.4:80"))
+    proxies = await _parse_source(
+        "http", "https://s", _fake_client("HTTP://1.2.3.4:80")
+    )
     assert [(p.url, p.protocol) for p in proxies] == [("HTTP://1.2.3.4:80", "HTTP")]
 
 
@@ -548,9 +550,7 @@ async def test_auto_refresh_prefers_cache():
     async def fake_refresh(**kwargs):
         calls.append(kwargs)
         if not kwargs.get("force"):
-            await rot._set_pool(
-                [make_proxy(url=f"http://p{i}:1") for i in range(20)]
-            )
+            await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(20)])
 
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
@@ -580,17 +580,13 @@ async def test_auto_refresh_falls_back_when_cache_dead():
 
 async def test_auto_refresh_partial_pool_skips_refill():
     rot = ProxyRotator()
-    await rot._set_pool(
-        [make_proxy(url=f"http://p{i}:1") for i in range(15)]
-    )
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(15)])
     calls = []
 
     async def fake_refresh(**kwargs):
         calls.append(kwargs)
         if kwargs.get("force"):
-            await rot._set_pool(
-                [make_proxy(url=f"http://n{i}:1") for i in range(22)]
-            )
+            await rot._set_pool([make_proxy(url=f"http://n{i}:1") for i in range(22)])
 
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
@@ -601,9 +597,7 @@ async def test_auto_refresh_partial_pool_skips_refill():
 
 async def test_auto_refresh_skips_refill_when_pool_ok():
     rot = ProxyRotator()
-    await rot._set_pool(
-        [make_proxy(url=f"http://p{i}:1") for i in range(25)]
-    )
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(25)])
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -617,9 +611,7 @@ async def test_auto_refresh_skips_refill_when_pool_ok():
 
 async def test_auto_refresh_cooldown_blocks_refill():
     rot = ProxyRotator()
-    await rot._set_pool(
-        [make_proxy(url=f"http://p{i}:1") for i in range(15)]
-    )
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(15)])
     rot._last_force_refresh = time.monotonic()
     calls = []
 
@@ -884,9 +876,7 @@ async def test_auto_refresh_gap_resets_after_elapsed():
 
 async def test_auto_refresh_at_threshold_no_force():
     rot = ProxyRotator()
-    await rot._set_pool(
-        [make_proxy(url=f"http://p{i}:1") for i in range(20)]
-    )
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(20)])
     calls = []
 
     async def fake_refresh(**kwargs):

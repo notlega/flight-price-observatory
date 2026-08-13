@@ -66,8 +66,7 @@ def _raise_for_http_status(response: requests.Response, url: str) -> None:
         raise ProviderConnectionError(f"HTTP {response.status_code} from {url}")
     body = response.text.lower()
     if response.status_code == 403 or (
-        response.status_code == 200
-        and any(marker in body for marker in _BLOCK_MARKERS)
+        response.status_code == 200 and any(marker in body for marker in _BLOCK_MARKERS)
     ):
         raise ProviderRateLimitedError(f"HTTP {response.status_code} block from {url}")
     try:
@@ -179,12 +178,10 @@ class GoogleFlightsProvider(BaseProvider):
 
         try:
             flights_raw = _extract_flights_raw(inner)
-        except (IndexError, TypeError):
+        except IndexError, TypeError:
             return None
 
-        flights = _parse_flights(
-            flights_raw, response.status_code, len(response.text)
-        )
+        flights = _parse_flights(flights_raw, response.status_code, len(response.text))
         return flights or None
 
     @staticmethod

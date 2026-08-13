@@ -51,3 +51,6 @@ pythonVersion = "3.14"
 typeCheckingMode = "standard"
 useLibraryCodeForTypes = true
 exclude = ["htmlcov", "storage", ".venv"]
+
+[tool.ruff]
+line-length = 100

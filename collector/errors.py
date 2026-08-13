@@ -28,4 +28,3 @@ class ErrorType:
     CONNECTION = "connection"
     DATA = "data"
     OTHER = "other"
-

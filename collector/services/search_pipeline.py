@@ -382,9 +382,7 @@ class BulkSearchPipeline:
         ) -> None:
             ds = dep_date.isoformat()
             flight_type = (
-                FlightType.ROUND_TRIP.value
-                if return_date
-                else FlightType.ONE_WAY.value
+                FlightType.ROUND_TRIP.value if return_date else FlightType.ONE_WAY.value
             )
             tasks.append((provider, origin, dest, ds, return_date, flight_type))
             seed_rows.append(

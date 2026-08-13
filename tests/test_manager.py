@@ -30,9 +30,7 @@ class _Registry(ProviderRegistry):
 
 async def test_run_no_providers_is_noop():
     with patch("collector.manager.BulkSearchPipeline") as pipeline_cls:
-        await CollectorManager(_EmptyRegistry()).run(
-            date(2026, 8, 1), date(2026, 8, 2)
-        )
+        await CollectorManager(_EmptyRegistry()).run(date(2026, 8, 1), date(2026, 8, 2))
     pipeline_cls.assert_not_called()
 
 
