@@ -86,6 +86,31 @@ def _build_sources() -> list[tuple[str, str]]:
     sources.append(("http", "https://proxyspace.pro/http.txt"))
     sources.append(("https", "https://proxyspace.pro/https.txt"))
     sources.append(("http", "https://openproxylist.xyz/http.txt"))
+    for p in protocols:
+        sources.append((p, f"{js}hproxy-com/free-proxy-list@main/{p}.txt"))
+        sources.append(
+            (p, f"{js}VMHeaven/VMHeaven-Free-Proxy-Updated@main/{p}.txt")
+        )
+    for p in ("http", "socks4", "socks5"):
+        sources.append(
+            (p, f"{js}databay-labs/free-proxy-list@master/{p}.txt")
+        )
+        sources.append(
+            (p, f"{js}proxygenerator1/ProxyGenerator@main/MostStable/{p}.txt")
+        )
+        sources.append(
+            (p, f"{js}ClearProxy/checked-proxy-list@main/{p}/raw/all.txt")
+        )
+    sources.append(
+        ("http", f"{js}ClearProxy/checked-proxy-list@main/custom/google/http.txt")
+    )
+    sources.append(("http", f"{js}theriturajps/proxy-list@main/proxies.txt"))
+    sources.append(
+        (
+            "http",
+            "https://databay.com/api/v1/proxy-list?google=true&ssl=strict&format=txt&protocol=http",
+        )
+    )
     return sources
 
 

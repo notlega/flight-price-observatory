@@ -79,7 +79,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 |-----------------|-------------------|---------------------------------------------|
 | Language        | Python 3.14+      | One language, entire stack                  |
 | HTTP            | curl_cffi         | TLS fingerprint spoofing, browser impersonation |
-| Proxy fetch     | httpx             | Pull proxy lists from 44 sources            |
+| Proxy fetch     | httpx             | Pull proxy lists from 64 sources            |
 | SQLite          | aiosqlite         | Async intermediary storage, upsert + retry  |
 | Flights API     | fli               | Google Flights internal API wrapper         |
 | Progress        | tqdm              | CLI progress bars (proxy test, search, retry)|

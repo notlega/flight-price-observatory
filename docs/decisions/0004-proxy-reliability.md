@@ -23,6 +23,7 @@ Long search runs over a shared proxy pool produced several failure modes:
 - **Refill:** auto-refresh throttled to 1 attempt / 5 s. 0 usable → force-refetch after 60 s; low-but-nonempty → after 30 min. "Usable" excludes rate-limit-parked proxies.
 - **Cache safety:** blacklisted proxies excluded from cache re-population; cache-fresh path only adopts the filtered pool if larger than the current usable pool.
 - **Preflight refill:** `run()` force-refetches once before aborting on zero working proxies.
+- **Source breadth:** 44 → 64 sources. New lists fetched via jsDelivr CDN (`cdn.jsdelivr.net/gh/…`) mirrors of GitHub repos to dodge `raw.githubusercontent.com` rate limits during refresh cycles. Includes Google-verified subsets (ClearProxy `custom/google`, Databay `google=true` API) targeting the 429 burn on Google Flights. Databay API `#` comment lines fall through the parser's port check and are dropped.
 
 ## Consequences
 
