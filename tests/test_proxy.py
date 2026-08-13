@@ -2,6 +2,8 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from curl_cffi.requests import exceptions as curl_exceptions
 
 
@@ -39,6 +41,15 @@ def test_normalise_url_rejects_bad_port():
 
 def test_normalise_url_rejects_missing_port():
     assert _normalise_url("http", "1.2.3.4") is None
+
+
+@pytest.mark.parametrize("raw", ["1.2.3.4:0", "1.2.3.4:65536", "1.2.3.4:-1", "1.2.3.4:99999"])
+def test_normalise_url_rejects_out_of_range_port(raw):
+    assert _normalise_url("http", raw) is None
+
+
+def test_normalise_url_rejects_empty_host():
+    assert _normalise_url("http", ":8080") is None
 
 
 def test_proxy_roundtrip_dict():
@@ -151,6 +162,23 @@ async def test_parse_source_mixed_lines():
 
 async def test_parse_source_http_error_returns_empty():
     proxies = await _parse_source("http", "https://s", _fake_client(status=500))
+    assert proxies == []
+
+
+async def test_parse_source_skips_comment_lines():
+    body = (
+        "# Free proxy list by Databay - https://databay.com/free-proxy-list\n"
+        "1.2.3.4:8080\n"
+        "# plain comment\n"
+        "5.6.7.8:8081\n"
+    )
+    proxies = await _parse_source("http", "https://s", _fake_client(body))
+    assert [p.url for p in proxies] == ["http://1.2.3.4:8080", "http://5.6.7.8:8081"]
+
+
+async def test_parse_source_comment_only_returns_empty():
+    body = "# header with url https://databay.com/free-proxy-list\n# plain\n"
+    proxies = await _parse_source("http", "https://s", _fake_client(body))
     assert proxies == []
 
 

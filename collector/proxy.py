@@ -130,9 +130,13 @@ def _normalise_url(protocol: str, raw: str) -> str | None:
     if ":" not in raw:
         return None
     ip, port = raw.split(":", 1)
+    if not ip:
+        return None
     try:
-        int(port)
+        port = int(port)
     except ValueError:
+        return None
+    if not 1 <= port <= 65535:
         return None
     prefix = _PROTOCOL_PREFIX[protocol]
     return f"{prefix}{ip}:{port}"
@@ -151,7 +155,7 @@ async def _parse_source(
     proxies: list[ProxyInfo] = []
     for line in resp.text.strip().split("\n"):
         line = line.strip()
-        if not line:
+        if not line or line.startswith("#"):
             continue
         if "://" in line:
             url_str = line
