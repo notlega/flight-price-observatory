@@ -448,7 +448,7 @@ class ProxyRotator:
                 if age < _CACHE_FRESH_TTL:
                     excluded = self._active_blacklist()
                     filtered = [p for p in cached_proxies if p.url not in excluded]
-                    if len(filtered) > self.working_count():
+                    if len(filtered) > self.usable_count():
                         await self._set_pool(filtered)
                     logger.info(
                         "Proxy cache fresh (%.0fs old): %d proxies (%d blacklisted)",
@@ -525,16 +525,16 @@ class ProxyRotator:
             self._last_auto_refresh = now
             logger.info("Proxy pool exhausted; auto-refreshing")
             await self.refresh(max_per_source=150)
-            working = self.working_count()
-            if working < _REFILL_THRESHOLD:
+            usable = self.usable_count()
+            if usable < _REFILL_THRESHOLD:
                 cooldown = (
-                    _EMPTY_REFETCH_COOLDOWN if working == 0 else _FORCE_REFETCH_COOLDOWN
+                    _EMPTY_REFETCH_COOLDOWN if usable == 0 else _FORCE_REFETCH_COOLDOWN
                 )
                 if now - self._last_force_refresh > cooldown:
                     self._last_force_refresh = now
                     logger.warning(
-                        "Proxy pool low (%d < %d); fetching fresh lists",
-                        working,
+                        "Proxy pool low (%d usable < %d); fetching fresh lists",
+                        usable,
                         _REFILL_THRESHOLD,
                     )
                     await self.refresh(force=True, max_per_source=150)
@@ -583,6 +583,10 @@ class ProxyRotator:
 
     def working_count(self) -> int:
         return len(self._proxies)
+
+    def usable_count(self) -> int:
+        now = time.monotonic()
+        return sum(1 for p in self._proxies if p.rate_limit_until <= now)
 
     def _active_blacklist(self) -> set[str]:
         now = time.monotonic()
