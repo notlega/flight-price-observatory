@@ -40,20 +40,6 @@ def test_search_parser_worker_default():
     assert ns.workers == 50
 
 
-class _FakeTqdm:
-    def __init__(self, **kwargs):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def update(self, n=1):
-        pass
-
-
 def _make_pipeline(provider=None, rotator=None, repo=None, **kwargs):
     pipeline = BulkSearchPipeline(
         providers=[provider or FakeProvider()],
@@ -274,7 +260,6 @@ async def test_run_batch_records_unexpected_failure():
     pipeline = _make_pipeline(provider=provider, repo=FlakyRepo())
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
     ):
         await pipeline._run_batch(
             [(provider, SIN, KUL, DEP, None, FlightType.ONE_WAY.value)], "test"
@@ -291,7 +276,6 @@ async def test_retry_loop_refreshes_when_pool_low():
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.date") as fake_date,
     ):
         fake_date.today.return_value = date(2026, 8, 1)
@@ -316,7 +300,6 @@ async def test_retry_loop_recovers_no_proxy_and_data(error_type):
     pipeline = _make_pipeline(provider=provider, repo=repo)
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.date") as fake_date,
     ):
         fake_date.today.return_value = date(2026, 8, 1)
@@ -352,7 +335,6 @@ async def test_run_empty_task_window_noop(tmp_path, start, end):
     pipeline.db_path = str(tmp_path / "state.db")
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
     ):
         await pipeline.run(start, end, max_days_ahead=330)
@@ -369,7 +351,6 @@ async def test_run_preflight_refreshes_when_no_proxies(tmp_path):
     pipeline.db_path = str(tmp_path / "state.db")
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.convert", new=AsyncMock()),
     ):
         with pytest.raises(RuntimeError, match="refusing to run"):
@@ -387,7 +368,6 @@ async def test_run_orchestrates_end_to_end(tmp_path):
 
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
         patch("collector.services.search_pipeline.date") as fake_date,
     ):
@@ -448,7 +428,6 @@ async def test_run_skips_past_dates(tmp_path):
     pipeline.db_path = str(tmp_path / "state.db")
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.tqdm", new=_FakeTqdm),
         patch("collector.services.search_pipeline.convert", new=AsyncMock()),
         patch("collector.services.search_pipeline.date") as fake_date,
     ):

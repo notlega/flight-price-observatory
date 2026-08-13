@@ -52,7 +52,7 @@ flowchart TD
 
     CLI --> REG --> PROV --> PIPE
 
-    PIPE --> ROT["ProxyRotator<br/>2-phase validate TCP|HTTP echo, tqdm, weighted select"]
+    PIPE --> ROT["ProxyRotator<br/>2-phase validate TCP|HTTP echo, weighted select"]
     PIPE --> RL["RateLimiter<br/>adaptive token bucket, halve on 429 burst, double on clean 60s"]
     PIPE --> SQL["SQLite aiosqlite<br/>upsert intermediary, track retries"]
     PIPE --> RETRY["Retry loop x3<br/>re-query 429s with fresh proxies"]
@@ -82,7 +82,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 | Proxy fetch     | httpx             | Pull proxy lists from 64 sources            |
 | SQLite          | aiosqlite         | Async intermediary storage, upsert + retry  |
 | Flights API     | fli               | Google Flights internal API wrapper         |
-| Progress        | tqdm              | CLI progress bars (proxy test, search, retry)|
+| Progress        | log lines         | Periodic %/rate/ETA progress in logs       |
 | Scheduler       | GitHub Actions    | Cron, no infra                              |
 | Package mgmt    | uv                | Fast, reproducible                          |
 | Testing         | pytest + ruff + basedpyright + coverage | 110 tests, 91% cov |

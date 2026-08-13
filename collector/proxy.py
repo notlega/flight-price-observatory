@@ -13,7 +13,6 @@ from pathlib import Path
 
 import httpx
 from curl_cffi.requests import AsyncSession, exceptions
-from tqdm import tqdm
 
 from collector.models.proxy import ProxyInfo
 
@@ -446,8 +445,11 @@ class ProxyRotator:
             queue.put_nowait(p)
 
         valid: list[ProxyInfo] = []
+        checked = 0
+        next_log_pct = 10
 
         async def worker():
+            nonlocal checked, next_log_pct
             async with AsyncSession() as session:
                 while True:
                     if target is not None and len(valid) >= target:
@@ -460,14 +462,22 @@ class ProxyRotator:
                         if result is not None:
                             valid.append(result)
                     finally:
-                        pbar.update(1)
+                        checked += 1
+                        pct = checked * 100 // len(proxies)
+                        if pct >= next_log_pct:
+                            logger.debug(
+                                "Validated %d/%d proxies (%d%%)",
+                                checked,
+                                len(proxies),
+                                pct,
+                            )
+                            next_log_pct = pct + 10
 
         n_workers = min(self._max_concurrent, max(len(proxies), 1))
         for _ in range(n_workers):
             queue.put_nowait(None)
-        with tqdm(total=len(proxies), desc="Testing proxies", unit="px") as pbar:
-            workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
-            await asyncio.gather(*workers)
+        workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
+        await asyncio.gather(*workers)
 
         valid.sort(key=lambda p: p.quality_score, reverse=True)
         return valid

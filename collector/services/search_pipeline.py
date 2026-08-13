@@ -2,12 +2,12 @@
 
 import asyncio
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
 from curl_cffi.requests import AsyncSession
 from fli.models import Airport
-from tqdm import tqdm
 
 from collector.convert import convert, default_output_path
 from collector.errors import (
@@ -48,6 +48,17 @@ def _dates_between(start_date: date, end_date: date, today: date) -> list[date]:
         )
         if current >= today
     ]
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
 
 
 class AttemptResult(NamedTuple):
@@ -218,15 +229,43 @@ class BulkSearchPipeline:
 
     async def _run_batch(
         self,
-        tasks: list[tuple[BaseProvider, Airport, Airport, str, str | None, str]],
+        tasks: list[ProviderTask],
         desc: str,
         retry_round: int = 0,
     ):
+        total = len(tasks)
         queue: asyncio.Queue = asyncio.Queue()
         for task in tasks:
             queue.put_nowait(task)
 
+        started = time.monotonic()
+        done = 0
+        next_log_pct = 5
+
+        def log_progress(final: bool = False) -> None:
+            nonlocal next_log_pct
+            pct = done * 100 // total if total else 100
+            if not final and pct < next_log_pct:
+                return
+            elapsed = time.monotonic() - started
+            if done:
+                rate = done / elapsed
+                eta = (total - done) / rate if rate > 0 else 0.0
+                stats = f"{rate:.1f}/s | {_format_duration(elapsed)} elapsed | {_format_duration(eta)} ETA"
+            else:
+                stats = f"n/a | {_format_duration(elapsed)} elapsed | n/a ETA"
+            logger.info(
+                "%s: %d%% (%d/%d) [%s]",
+                desc,
+                pct,
+                done,
+                total,
+                stats,
+            )
+            next_log_pct = pct + 5
+
         async def worker():
+            nonlocal done, next_log_pct
             async with AsyncSession() as session:
                 while True:
                     try:
@@ -268,12 +307,13 @@ class BulkSearchPipeline:
                             retry_round,
                         )
                     finally:
-                        pbar.update(1)
+                        done += 1
+                        log_progress()
 
-        with tqdm(total=len(tasks), desc=desc, unit="task") as pbar:
-            n_workers = min(self.max_concurrent, max(len(tasks), 1))
-            workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
-            await asyncio.gather(*workers)
+        n_workers = min(self.max_concurrent, max(total, 1))
+        workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
+        await asyncio.gather(*workers)
+        log_progress(final=True)
 
     async def _record_failure(
         self,
