@@ -187,6 +187,71 @@ def test_build_sources_no_duplicate_urls():
     assert len(urls) == len(set(urls))
 
 
+def test_build_sources_entries_well_formed():
+    allowed = {"http", "https", "socks4", "socks5"}
+    for protocol, url in _build_sources():
+        assert protocol in allowed
+        assert url.startswith(("http://", "https://"))
+
+
+def test_build_sources_count():
+    assert len(_build_sources()) == 64
+
+
+def test_normalise_url_drops_ipv6():
+    assert _normalise_url("http", "[::1]:8080") is None
+
+
+async def test_parse_source_preserves_uppercase_scheme():
+    proxies = await _parse_source("http", "https://s", _fake_client("HTTP://1.2.3.4:80"))
+    assert [(p.url, p.protocol) for p in proxies] == [("HTTP://1.2.3.4:80", "HTTP")]
+
+
+async def test_parse_all_sources_first_wins_for_same_proxy():
+    a = make_proxy(url="http://9.9.9.9:9")
+    with (
+        patch("collector.proxy._parse_source", side_effect=[[a], [a]]),
+        patch(
+            "collector.proxy._PROXY_SOURCES",
+            [("http", "s1"), ("socks5", "s2")],
+        ),
+    ):
+        proxies = await _parse_all_sources()
+    assert [(p.url, p.protocol) for p in proxies] == [("http://9.9.9.9:9", "http")]
+
+
+async def test_parse_all_sources_isolates_failed_source():
+    a = make_proxy(url="http://a:1")
+    with (
+        patch(
+            "collector.proxy._parse_source",
+            side_effect=[[a], RuntimeError("boom")],
+        ),
+        patch(
+            "collector.proxy._PROXY_SOURCES",
+            [("http", "s1"), ("http", "s2")],
+        ),
+    ):
+        proxies = await _parse_all_sources()
+    assert [p.url for p in proxies] == ["http://a:1"]
+
+
+async def test_parse_all_sources_caps_per_source():
+    a = make_proxy(url="http://a:1")
+    b = make_proxy(url="http://b:2")
+    c = make_proxy(url="http://c:3")
+    with (
+        patch("collector.proxy._parse_source", side_effect=[[a, b, c]]),
+        patch(
+            "collector.proxy._PROXY_SOURCES",
+            [("http", "s1")],
+        ),
+    ):
+        proxies = await _parse_all_sources(max_per_source=2)
+    assert len(proxies) == 2
+    assert {p.url for p in proxies} <= {"http://a:1", "http://b:2", "http://c:3"}
+
+
 async def test_parse_all_sources_dedups_and_caps():
     a = make_proxy(url="http://a:1")
     b = make_proxy(url="http://b:2")
