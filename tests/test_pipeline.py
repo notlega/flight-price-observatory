@@ -13,7 +13,7 @@ from collector.errors import (
     ProviderTimeoutError,
 )
 from collector.models import FlightType
-from collector.services.search_pipeline import BulkSearchPipeline
+from collector.services.search_pipeline import BulkSearchPipeline, _MAX_ATTEMPTS
 
 from tests.libs.factories import make_flights, make_proxy
 from tests.libs.fakes import FakeCurlSession, FakeProvider, FakeRepo, FakeRotator
@@ -162,7 +162,7 @@ async def test_search_and_store_success_stores_once():
     row = pipeline.repo.upserts[0]
     assert row["success"] is True
     assert row["error_type"] is None
-    assert row["retries"] == 0
+    assert row["retries"] == 1
     assert pipeline.rotator.failures == []
 
 
@@ -188,7 +188,7 @@ async def test_search_and_store_retries_then_succeeds():
     assert len(pipeline.repo.upserts) == 1
     row = pipeline.repo.upserts[0]
     assert row["success"] is True
-    assert row["retries"] == 2
+    assert row["retries"] == 3
     assert len(pipeline.rotator.failures) == 2
 
 
@@ -209,7 +209,26 @@ async def test_search_and_store_all_fail_stores_failure():
     row = pipeline.repo.upserts[0]
     assert row["success"] is False
     assert row["error_type"] == ErrorType.CONNECTION
+    assert row["retries"] == 3
     assert len(pipeline.rotator.failures) == 3
+
+
+async def test_search_and_store_failure_retries_scale_with_round():
+    pipeline = _make_pipeline(
+        provider=FakeProvider(script=[ProviderConnectionError("c")] * 3)
+    )
+    await pipeline._search_and_store(
+        pipeline.providers[0],
+        SIN,
+        KUL,
+        DEP,
+        None,
+        FlightType.ONE_WAY.value,
+        AsyncMock(),
+        retry_round=1,
+    )
+    assert pipeline.repo.upserts[0]["success"] is False
+    assert pipeline.repo.upserts[0]["retries"] == 6
 
 
 async def test_data_error_not_reported_to_rotator():
@@ -227,6 +246,7 @@ async def test_data_error_not_reported_to_rotator():
     )
     assert pipeline.rotator.failures == []
     assert pipeline.repo.upserts[0]["error_type"] == ErrorType.DATA
+    assert pipeline.repo.upserts[0]["retries"] == 3
 
 
 async def test_other_error_not_reported_to_rotator():

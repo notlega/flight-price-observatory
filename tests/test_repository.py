@@ -2,6 +2,7 @@ import os
 
 from collector.errors import ErrorType
 from collector.repository import SearchRepository, _RETRY_ERROR_TYPES
+from collector.services.search_pipeline import _MAX_ATTEMPTS
 
 
 async def test_upsert_flush_counts(repo):
@@ -85,15 +86,51 @@ def test_retry_error_types_cover_transient_and_proxy_errors():
 
 async def test_get_failed_respects_max_retries(repo):
     await repo.upsert(
-        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 2, False, "t"
+        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 3, False, "t"
     )
     await repo.upsert(
-        "r2", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 3, False, "t"
+        "r2", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 4, False, "t"
     )
     await repo.flush()
 
     failed = await repo.get_failed(max_retries=3)
     assert {r[0] for r in failed} == {"r1"}
+
+
+async def test_get_failed_retry_round_boundaries(repo):
+    for route, retries in [
+        ("r0", _MAX_ATTEMPTS),
+        ("r1", 2 * _MAX_ATTEMPTS),
+        ("r2", 3 * _MAX_ATTEMPTS),
+        ("r3", 4 * _MAX_ATTEMPTS),
+    ]:
+        await repo.upsert(
+            route,
+            "2026-08-01",
+            "",
+            "ONE_WAY",
+            "O",
+            "D",
+            None,
+            "data",
+            retries,
+            False,
+            "t",
+        )
+    await repo.flush()
+
+    assert {r[0] for r in await repo.get_failed(max_retries=1 * _MAX_ATTEMPTS)} == {
+        "r0"
+    }
+    assert {r[0] for r in await repo.get_failed(max_retries=2 * _MAX_ATTEMPTS)} == {
+        "r0",
+        "r1",
+    }
+    assert {r[0] for r in await repo.get_failed(max_retries=3 * _MAX_ATTEMPTS)} == {
+        "r0",
+        "r1",
+        "r2",
+    }
 
 
 async def test_count_by_error(repo):

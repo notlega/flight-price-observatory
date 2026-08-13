@@ -171,7 +171,7 @@ class BulkSearchPipeline:
                     flight_type,
                     flights=result.flights,
                     error_type=None,
-                    retries=attempt,
+                    retries=attempt + 1,
                     success=True,
                     searched_at=searched_at,
                 )
@@ -195,7 +195,7 @@ class BulkSearchPipeline:
             flight_type,
             flights=[],
             error_type=error_type,
-            retries=retry_round,
+            retries=(retry_round + 1) * _MAX_ATTEMPTS,
             success=False,
             searched_at=searched_at,
         )
@@ -333,7 +333,7 @@ class BulkSearchPipeline:
                 flight_type,
                 flights=[],
                 error_type=ErrorType.OTHER,
-                retries=retry_round,
+                retries=(retry_round + 1) * _MAX_ATTEMPTS,
                 success=False,
                 searched_at=datetime.now(timezone.utc).isoformat(),
             )
@@ -361,7 +361,7 @@ class BulkSearchPipeline:
     async def _retry_loop(self, rounds: int = 3):
         provider_map = await self._get_provider_map()
         for rnd in range(1, rounds + 1):
-            failed = await self.repo.get_failed(max_retries=rnd)
+            failed = await self.repo.get_failed(max_retries=rnd * _MAX_ATTEMPTS)
             if not failed:
                 logger.info("No failed tasks to retry")
                 return

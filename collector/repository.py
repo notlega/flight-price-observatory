@@ -175,11 +175,16 @@ class SearchRepository:
             await self._c.commit()
 
     async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
+        """Return failed tasks retried at most ``max_retries`` attempts.
+
+        ``retries`` stores cumulative attempts consumed (1-based), so a task
+        that failed once per round carries ``retries = round * _MAX_ATTEMPTS``.
+        """
         placeholders = ",".join("?" for _ in _RETRY_ERROR_TYPES)
         cursor = await self._c.execute(
             "SELECT route, dep_date, return_date, flight_type "
             f"FROM search_results WHERE success = 0 "
-            f"AND error_type IN ({placeholders}) AND retries < ?",
+            f"AND error_type IN ({placeholders}) AND retries <= ?",
             (*_RETRY_ERROR_TYPES, max_retries),
         )
         rows = await cursor.fetchall()
