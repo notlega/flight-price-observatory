@@ -34,6 +34,17 @@ def _route_key(origin: Airport, dest: Airport) -> str:
     return f"{origin.value}|{dest.value}"
 
 
+def _dates_between(start_date: date, end_date: date, today: date) -> list[date]:
+    return [
+        current
+        for current in (
+            start_date + timedelta(days=n)
+            for n in range((end_date - start_date).days + 1)
+        )
+        if current >= today
+    ]
+
+
 class AttemptResult(NamedTuple):
     flights: list[dict] | None
     error_type: str | None
@@ -361,76 +372,53 @@ class BulkSearchPipeline:
         def supports(provider: BaseProvider, origin: str, dest: str) -> bool:
             return provider.supports is None or (origin, dest) in provider.supports
 
+        def emit(
+            provider: BaseProvider,
+            origin: Airport,
+            dest: Airport,
+            dep_date: date,
+            return_date: str | None,
+        ) -> None:
+            ds = dep_date.isoformat()
+            flight_type = (
+                FlightType.ROUND_TRIP.value
+                if return_date
+                else FlightType.ONE_WAY.value
+            )
+            tasks.append(
+                (provider, origin, dest, ds, return_date, flight_type)
+            )
+            seed_rows.append(
+                (
+                    _route_key(origin, dest),
+                    ds,
+                    return_date or "",
+                    flight_type,
+                    origin.value,
+                    dest.value,
+                )
+            )
+
         for provider in self.providers:
             for r in RouteCatalog.one_way_routes():
                 if not supports(provider, r.origin, r.dest):
                     continue
                 origin = RouteCatalog.resolve(r.origin)
                 dest = RouteCatalog.resolve(r.dest)
-                route = _route_key(origin, dest)
-                current = start_date
-                while current <= effective_end:
-                    if current < today:
-                        current += timedelta(days=1)
-                        continue
-                    ds = current.isoformat()
-                    tasks.append(
-                        (
-                            provider,
-                            origin,
-                            dest,
-                            ds,
-                            None,
-                            FlightType.ONE_WAY.value,
-                        )
-                    )
-                    seed_rows.append(
-                        (
-                            route,
-                            ds,
-                            "",
-                            FlightType.ONE_WAY.value,
-                            origin.value,
-                            dest.value,
-                        )
-                    )
-                    current += timedelta(days=1)
+                for current in _dates_between(start_date, effective_end, today):
+                    emit(provider, origin, dest, current, None)
 
             for r in RouteCatalog.round_trip_routes():
                 if not supports(provider, r.origin, r.dest):
                     continue
                 origin = RouteCatalog.resolve(r.origin)
                 dest = RouteCatalog.resolve(r.dest)
-                route = _route_key(origin, dest)
                 for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
-                    current = start_date
-                    while current <= effective_end:
-                        if current < today:
-                            current += timedelta(days=1)
-                            continue
-                        ds = current.isoformat()
-                        return_date = (current + timedelta(days=offset)).isoformat()
-                        tasks.append(
-                            (
-                                provider,
-                                origin,
-                                dest,
-                                ds,
-                                return_date,
-                                FlightType.ROUND_TRIP.value,
-                            )
-                        )
-                        seed_rows.append(
-                            (
-                                route,
-                                ds,
-                                return_date,
-                                FlightType.ROUND_TRIP.value,
-                                origin.value,
-                                dest.value,
-                            )
-                        )
-                        current += timedelta(days=1)
+                    for current in _dates_between(start_date, effective_end, today):
+                        return_date = (
+                            current + timedelta(days=offset)
+                        ).isoformat()
+                        emit(provider, origin, dest, current, return_date)
 
         return tasks, seed_rows
 

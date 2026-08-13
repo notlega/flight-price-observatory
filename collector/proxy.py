@@ -44,6 +44,8 @@ _EMPTY_REFETCH_COOLDOWN = 60
 _AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
+_FETCH_TIMEOUT = 10
+_REFILL_MAX_PER_SOURCE = 150
 
 
 def _build_sources() -> list[tuple[str, str]]:
@@ -170,7 +172,7 @@ async def _parse_source(
 
 
 async def _parse_all_sources(max_per_source: int = 0) -> list[ProxyInfo]:
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT) as client:
         results = await asyncio.gather(
             *[_parse_source(proto, url, client) for proto, url in _PROXY_SOURCES],
             return_exceptions=True,
@@ -571,7 +573,7 @@ class ProxyRotator:
                 return
             self._last_auto_refresh = now
             logger.info("Proxy pool exhausted; auto-refreshing")
-            await self.refresh(max_per_source=150)
+            await self.refresh(max_per_source=_REFILL_MAX_PER_SOURCE)
             usable = self.usable_count()
             if usable < _REFILL_THRESHOLD:
                 cooldown = (
@@ -584,7 +586,7 @@ class ProxyRotator:
                         usable,
                         _REFILL_THRESHOLD,
                     )
-                    await self.refresh(force=True, max_per_source=150)
+                    await self.refresh(force=True, max_per_source=_REFILL_MAX_PER_SOURCE)
         except Exception:
             logger.exception("Proxy auto-refresh failed")
         finally:

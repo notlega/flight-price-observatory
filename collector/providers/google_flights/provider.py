@@ -43,6 +43,17 @@ _HEADERS = {
 
 _REQUEST_TIMEOUT = 30
 
+_FLIGHTS_PAGE_INDEXES = (2, 3)
+
+
+def _extract_flights_raw(inner: list) -> list:
+    return [
+        item
+        for i in _FLIGHTS_PAGE_INDEXES
+        if isinstance(inner[i], list)
+        for item in inner[i][0]
+    ]
+
 
 class GoogleFlightsProvider(BaseProvider):
     name = "google_flights"
@@ -134,13 +145,8 @@ class GoogleFlightsProvider(BaseProvider):
             return None
 
         try:
-            flights_raw = [
-                item
-                for i in (2, 3)
-                if isinstance(inner[i], list)
-                for item in inner[i][0]
-            ]
-        except IndexError, TypeError:
+            flights_raw = _extract_flights_raw(inner)
+        except (IndexError, TypeError):
             return None
 
         flights: list[FlightResult] = []
