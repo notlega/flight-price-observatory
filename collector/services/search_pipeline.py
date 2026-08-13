@@ -384,6 +384,10 @@ class BulkSearchPipeline:
                     retry_tasks.append(
                         (provider, origin, dest, dep_date, return_date, flight_type)
                     )
+                else:
+                    logger.warning(
+                        "Skipping failed route %s: no provider covers it", route
+                    )
 
             if retry_tasks:
                 logger.info(

@@ -1,3 +1,4 @@
+from typing import cast
 from unittest.mock import AsyncMock
 
 from curl_cffi import requests
@@ -5,6 +6,8 @@ from curl_cffi import requests
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
 from fli.models import Airport
+
+_MISSING = object()
 
 
 class FakeProvider(BaseProvider):
@@ -16,10 +19,12 @@ class FakeProvider(BaseProvider):
 
     def __init__(
         self,
-        supports: set[tuple[str, str]] | None = None,
+        supports: set[tuple[str, str]] | None | object = _MISSING,
         script: list | None = None,
     ):
-        self._supports = supports or {("SIN", "KUL")}
+        if supports is _MISSING:
+            supports = {("SIN", "KUL")}
+        self._supports = cast(set[tuple[str, str]] | None, supports)
         self.script = list(script or [])
         self.calls: list[tuple[Airport, Airport, str, str | None, str | None]] = []
 

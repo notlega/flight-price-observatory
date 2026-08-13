@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, timedelta
+import logging
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, patch
 
@@ -365,6 +366,100 @@ async def test_retry_loop_refresh_threshold_boundary(working):
         assert rotator.refreshes
     else:
         assert rotator.refreshes == []
+
+
+def test_dates_between_filters_past_and_future():
+    from collector.services.search_pipeline import _dates_between
+
+    today = date(2026, 8, 14)
+    assert _dates_between(date(2026, 8, 10), date(2026, 8, 16), today) == [
+        date(2026, 8, 14),
+        date(2026, 8, 15),
+        date(2026, 8, 16),
+    ]
+    assert _dates_between(date(2026, 8, 15), date(2026, 8, 16), today) == [
+        date(2026, 8, 15),
+        date(2026, 8, 16),
+    ]
+    assert _dates_between(date(2026, 8, 1), date(2026, 8, 13), today) == []
+    assert _dates_between(date(2026, 8, 15), date(2026, 8, 15), today) == [
+        date(2026, 8, 15)
+    ]
+
+
+async def test_retry_loop_retries_dep_today():
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[make_proxy()], working=20)
+    repo = FakeRepo()
+    repo.failed = [(ROUTE, date.today().isoformat(), "", "ONE_WAY")]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    with patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession):
+        await pipeline._retry_loop(rounds=1)
+    assert repo.upserts[-1]["success"] is True
+
+
+async def test_retry_loop_warns_route_not_covered(caplog):
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[make_proxy()], working=20)
+    repo = FakeRepo()
+    repo.failed = [
+        (f"{KUL.value}|{SIN.value}", date.today().isoformat(), "", "ONE_WAY")
+    ]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        caplog.at_level(logging.WARNING),
+    ):
+        await pipeline._retry_loop(rounds=1)
+    assert repo.upserts == []
+    assert "no provider covers it" in caplog.text
+
+
+async def test_retry_loop_supports_none_covers_all_routes():
+    provider = FakeProvider(supports=None, script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[make_proxy()], working=20)
+    repo = FakeRepo()
+    repo.failed = [
+        (f"{KUL.value}|{SIN.value}", date.today().isoformat(), "", "ONE_WAY")
+    ]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    with patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession):
+        await pipeline._retry_loop(rounds=1)
+    assert repo.upserts[-1]["success"] is True
+
+
+async def test_run_max_days_ahead_zero_limits_to_today(tmp_path):
+    provider = FakeProvider(script=[make_flights(100)] * 60)
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    pipeline.db_path = str(tmp_path / "state.db")
+    today = date.today()
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()),
+    ):
+        await pipeline.run(
+            today - timedelta(days=5), today + timedelta(days=10), max_days_ahead=0
+        )
+    assert provider.calls
+    assert {call[2] for call in provider.calls} == {today.isoformat()}
+
+
+async def test_run_max_days_ahead_negative_builds_no_tasks(tmp_path):
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    pipeline.db_path = str(tmp_path / "state.db")
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
+    ):
+        await pipeline.run(date.today(), date.today(), max_days_ahead=-1)
+    assert repo.inserted == []
+    assert repo.upserts == []
+    convert.assert_awaited_once()
 
 
 async def test_retry_loop_stops_when_nothing_failed():

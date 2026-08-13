@@ -1,5 +1,9 @@
+import asyncio
+import json
 import os
+import sqlite3
 
+import aiosqlite
 import pytest
 
 from collector.errors import ErrorType
@@ -21,6 +25,88 @@ async def test_writer_auto_flushes_at_batch_boundary(repo, n):
         )
     await repo.flush()
     assert await repo.count_failed() == n
+
+
+async def test_iter_successful_raises_on_corrupt_flights_json(repo):
+    await repo.upsert(
+        "r", "2026-08-01", "", "ONE_WAY", "O", "D", [{"p": 1}], None, 0, True, "t"
+    )
+    await repo.flush()
+    await repo._c.execute(
+        "UPDATE search_results SET flights = '{broken' WHERE route = 'r'"
+    )
+    await repo._c.commit()
+    with pytest.raises(json.JSONDecodeError):
+        rows = [row async for row in repo.iter_successful()]
+        assert rows
+
+
+async def test_legacy_schema_without_return_date_is_dropped(tmp_path):
+    db = str(tmp_path / "legacy.db")
+    conn = await aiosqlite.connect(db, isolation_level=None)
+    await conn.execute(
+        "CREATE TABLE search_results ("
+        "route TEXT, dep_date TEXT, flight_type TEXT, origin TEXT, destination TEXT)"
+    )
+    await conn.commit()
+    await conn.close()
+
+    repo = SearchRepository(db)
+    await repo.open()
+    cursor = await repo._c.execute("PRAGMA table_info(search_results)")
+    cols = {row[1] for row in await cursor.fetchall()}
+    assert "return_date" in cols
+    await repo.close()
+
+
+async def test_open_corrupt_db_file_raises(tmp_path):
+    db = str(tmp_path / "bad.db")
+    with open(db, "wb") as f:
+        f.write(b"\x00\x01 this is not a sqlite database")
+    repo = SearchRepository(db)
+    with pytest.raises(sqlite3.DatabaseError):
+        await repo.open()
+
+
+async def test_close_is_idempotent(repo):
+    await repo.close()
+    await repo.close()
+
+
+async def test_concurrent_flushes_serialize(repo):
+    for i in range(20):
+        await repo.upsert(
+            f"r{i}",
+            "2026-08-01",
+            "",
+            "ONE_WAY",
+            "O",
+            "D",
+            [{"p": i}],
+            None,
+            0,
+            True,
+            "t",
+        )
+    await asyncio.gather(repo.flush(), repo.flush(), repo.flush())
+    assert await repo.count_successful() == 20
+
+
+async def test_delete_db_removes_wal_and_shm(tmp_path):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    await repo.upsert(
+        "r", "2026-08-01", "", "ONE_WAY", "O", "D", [{"p": 1}], None, 0, True, "t"
+    )
+    await repo.flush()
+    wal, shm = f"{db}-wal", f"{db}-shm"
+    existed = os.path.exists(wal) or os.path.exists(shm)
+    await repo.delete_db()
+    assert not os.path.exists(db)
+    if existed:
+        assert not os.path.exists(wal)
+        assert not os.path.exists(shm)
 
 
 async def test_upsert_flush_counts(repo):
