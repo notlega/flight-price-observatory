@@ -1,3 +1,5 @@
+"""Adaptive rate limiter with 429 backoff and recovery."""
+
 import asyncio
 import logging
 import time

@@ -1,3 +1,5 @@
+"""CLI entry point dispatching to convert and search subcommands."""
+
 import argparse
 
 

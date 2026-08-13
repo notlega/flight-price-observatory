@@ -1,3 +1,5 @@
+"""Runtime patch adding airport codes missing from the fli package."""
+
 from fli.models import Airport
 from fli.search import _decoders as _fli_decoders
 

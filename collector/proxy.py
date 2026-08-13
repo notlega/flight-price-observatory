@@ -1,3 +1,5 @@
+"""Free-proxy pool management: source fetch, validation, caching, rotation."""
+
 import asyncio
 import ipaddress
 import json
@@ -487,6 +489,12 @@ class ProxyRotator:
     async def refresh(
         self, force: bool = False, max_per_source: int | None = None
     ):
+        """Repopulate the proxy pool from cache or all sources.
+
+        Args:
+            force: Bypass cache freshness and refetch every source.
+            max_per_source: Cap on candidates validated per source.
+        """
         cap = self._max_per_source if max_per_source is None else max_per_source
         logger.info("Fetching proxy lists from %d sources...", len(_PROXY_SOURCES))
         if not force:
@@ -549,6 +557,7 @@ class ProxyRotator:
         return proxy
 
     async def get_proxy(self) -> ProxyInfo | None:
+        """Return the next usable proxy, triggering a refresh when empty."""
         async with self._lock:
             proxy = self._pick()
         if proxy is None:

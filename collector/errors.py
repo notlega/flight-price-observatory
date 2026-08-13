@@ -1,3 +1,6 @@
+"""Provider error taxonomy and task failure classification."""
+
+
 class ProviderError(Exception):
     pass
 

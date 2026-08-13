@@ -1,3 +1,5 @@
+"""Search subcommand: run bulk flight price collection."""
+
 import asyncio
 import logging
 from datetime import date, timedelta

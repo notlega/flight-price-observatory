@@ -1,3 +1,5 @@
+"""Convert subcommand: export search DB to JSONL."""
+
 import asyncio
 import logging
 from typing import Any

@@ -1,3 +1,5 @@
+"""Abstract provider contract shared by all flight data sources."""
+
 from abc import ABC, abstractmethod
 
 from curl_cffi.requests import AsyncSession

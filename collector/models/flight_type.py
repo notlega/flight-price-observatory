@@ -1,3 +1,5 @@
+"""Supported flight search types."""
+
 from enum import Enum
 
 

@@ -1,3 +1,5 @@
+"""Provider registry: discoverable provider implementations."""
+
 import logging
 
 from collector.providers.base import BaseProvider

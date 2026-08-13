@@ -1,3 +1,5 @@
+"""SQLite-backed search result store with upsert and retry tracking."""
+
 import asyncio
 import json
 import logging
@@ -66,6 +68,7 @@ class SearchRepository:
         return self._write_queue
 
     async def open(self):
+        """Open the database connection and start the writer loop."""
         db_dir = os.path.dirname(self._db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
@@ -141,6 +144,7 @@ class SearchRepository:
         success: bool,
         searched_at: str,
     ):
+        """Queue a search result write, keyed by route and dates."""
         flights_json = json.dumps(flights) if flights else None
         self._q.put_nowait(
             (

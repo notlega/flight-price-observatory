@@ -1,3 +1,5 @@
+"""Top-level entry point wiring providers into the search pipeline."""
+
 import logging
 from datetime import date
 
@@ -22,6 +24,17 @@ class CollectorManager:
         workers: int = 50,
         db_path: str = "storage/db/search_state.db",
     ):
+        """Collect flight prices for all providers over the date range.
+
+        Args:
+            start_date: First departure date to search.
+            end_date: Last departure date to search.
+            max_days_ahead: Cap on departure horizon from today.
+            currency: Currency for returned prices.
+            rate: Max requests per second across the pipeline.
+            workers: Concurrent search workers.
+            db_path: SQLite database path for search state.
+        """
         providers: list[BaseProvider] = [
             provider_class() for provider_class in self._registry.providers.values()
         ]

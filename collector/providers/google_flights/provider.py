@@ -1,3 +1,5 @@
+"""Google Flights provider backed by the fli wire protocol."""
+
 import asyncio
 import logging
 from copy import deepcopy
@@ -190,6 +192,20 @@ class GoogleFlightsProvider(BaseProvider):
         session: AsyncSession | None = None,
         return_date: str | None = None,
     ) -> list[dict] | None:
+        """Search flights for one origin-destination-date combination.
+
+        Args:
+            origin: Departure airport.
+            dest: Destination airport.
+            date_str: Departure date (ISO-8601).
+            currency: Currency for prices.
+            proxy_url: Proxy URL; required (direct connections forbidden).
+            session: Reusable curl session; a new one is created if absent.
+            return_date: Return date for round trips, else one-way.
+
+        Returns:
+            Serialised flight results, or None when no flights are found.
+        """
         self._require_proxy(proxy_url)
         assert proxy_url is not None
 

@@ -1,3 +1,5 @@
+"""Bulk search orchestration: task building, batched execution, retries."""
+
 import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -428,6 +430,16 @@ class BulkSearchPipeline:
         end_date: date,
         max_days_ahead: int = 330,
     ):
+        """Run the full bulk search lifecycle.
+
+        Builds tasks, seeds the DB, refreshes the proxy pool, executes
+        batches, retries transient failures, then exports to JSONL.
+
+        Args:
+            start_date: First departure date.
+            end_date: Last departure date.
+            max_days_ahead: Hard cap on departure horizon from today.
+        """
         cutoff = date.today() + timedelta(days=max_days_ahead)
         effective_end = min(end_date, cutoff)
 

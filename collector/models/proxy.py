@@ -1,3 +1,5 @@
+"""Proxy pool entry model and cache serialisation."""
+
 from dataclasses import dataclass
 
 

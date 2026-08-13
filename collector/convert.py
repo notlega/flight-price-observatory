@@ -1,3 +1,5 @@
+"""Export stored search results to JSONL and optional raw payloads."""
+
 import json
 import logging
 from datetime import datetime

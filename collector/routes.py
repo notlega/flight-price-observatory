@@ -1,4 +1,7 @@
+"""Route catalog: one-way and round-trip route definitions."""
+
 from dataclasses import dataclass
+
 from fli.models import Airport
 
 
