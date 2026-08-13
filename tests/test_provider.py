@@ -74,6 +74,31 @@ async def test_search_past_date_raises_data_error():
         )
 
 
+async def test_search_malformed_date_raises_data_error():
+    with pytest.raises(ProviderDataError):
+        await _provider().search(
+            SIN,
+            KUL,
+            "2026-99-99",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, FakeSession(response=FakeResponse(status_code=200, text=""))),
+        )
+
+
+async def test_search_past_return_date_raises_data_error():
+    with pytest.raises(ProviderDataError):
+        await _provider().search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            return_date="2000-01-01",
+            session=cast(Any, FakeSession(response=FakeResponse(status_code=200, text=""))),
+        )
+
+
 @pytest.mark.parametrize(
     "status,expected",
     [
