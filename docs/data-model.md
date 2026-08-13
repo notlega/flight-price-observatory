@@ -57,4 +57,4 @@ Output of `GoogleFlightsProvider.search()`, from `fli` lib `parse_flight_row(...
 
 ## Proxy cache (`storage/proxy_cache.json`)
 
-Persisted `(timestamp, [ProxyInfo dicts])`. Each proxy: `url`, `protocol`, `quality_score`, `latency_ms`, `last_validated`. Fresh for 15 min, revalidated up to 24 h; `refresh(force=True)` bypasses.
+Persisted `(timestamp, [ProxyInfo dicts])`. Each proxy: `url`, `protocol`, `quality_score`, `latency_ms`, `last_validated`. Fresh for 30 min, revalidated up to 24 h; `refresh(force=True)` bypasses.

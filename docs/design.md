@@ -29,4 +29,4 @@
 
 - Single free tier infra: GitHub Actions cron, Cloudflare R2 (10 GB free).
 - Rate limiter guards Google Flights endpoint from 429-spiral; adaptive halving/doubling protects the provider.
-- Proxy cache (fresh 15 min) avoids re-fetching 27 sources every run.
+- Proxy cache (fresh 30 min) avoids re-fetching 27 sources every run.

@@ -124,6 +124,12 @@ class GoogleFlightsProvider(BaseProvider):
 
         inner = parse_first_wrb_payload(response.text)
         if inner is None:
+            logger.debug(
+                "No wrb payload: status=%s len=%s marker=%s",
+                response.status_code,
+                len(response.text),
+                "wrb" in response.text,
+            )
             return None
 
         try:
@@ -143,6 +149,13 @@ class GoogleFlightsProvider(BaseProvider):
             except Exception:
                 continue
 
+        if not flights:
+            logger.debug(
+                "Payload parsed but no flights: status=%s len=%s raw_rows=%d",
+                response.status_code,
+                len(response.text),
+                len(flights_raw),
+            )
         return flights or None
 
     @staticmethod

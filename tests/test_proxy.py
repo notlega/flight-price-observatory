@@ -356,6 +356,41 @@ async def test_get_proxy_empty_triggers_auto_refresh():
         refresh.assert_awaited_once()
 
 
+async def test_auto_refresh_prefers_cache():
+    rot = ProxyRotator()
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+        if not kwargs.get("force"):
+            await rot._set_pool([make_proxy(url="http://a:1")])
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [{"max_per_source": 150}]
+    assert rot.working_count() == 1
+
+
+async def test_auto_refresh_falls_back_when_cache_dead():
+    rot = ProxyRotator()
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("force"):
+            await rot._set_pool([make_proxy(url="http://b:1")])
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [
+        {"max_per_source": 150},
+        {"force": True, "max_per_source": 150},
+    ]
+    assert rot.working_count() == 1
+
+
 async def test_refresh_uses_fresh_cache():
     rot = ProxyRotator()
     cached = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]

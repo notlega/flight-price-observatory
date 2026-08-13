@@ -15,7 +15,7 @@ from collector.models.proxy import ProxyInfo
 logger = logging.getLogger(__name__)
 
 _PROXY_CACHE_PATH = "storage/proxy_cache.json"
-_CACHE_FRESH_TTL = 15 * 60
+_CACHE_FRESH_TTL = 30 * 60
 _CACHE_MAX_AGE = 24 * 3600
 
 _FAST_LATENCY_MS = 500
@@ -413,7 +413,10 @@ class ProxyRotator:
     async def _auto_refresh(self):
         try:
             logger.info("Proxy pool exhausted; auto-refreshing")
-            await self.refresh(force=True, max_per_source=150)
+            await self.refresh(max_per_source=150)
+            if self.working_count() == 0:
+                logger.warning("Cache path yielded no working proxies; fetching fresh")
+                await self.refresh(force=True, max_per_source=150)
         except Exception:
             logger.exception("Proxy auto-refresh failed")
         finally:

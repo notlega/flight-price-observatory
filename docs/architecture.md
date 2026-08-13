@@ -64,7 +64,7 @@ Adaptive token bucket (`collector/services/rate_limiter.py`):
 
 - 2-phase validation: TCP prefilter -> HTTP echo latency (concurrent).
 - Quality score = f(latency), proxies weighted by score, dead ones removed.
-- Sources fetched from 27 list endpoints; results cached to `storage/proxy_cache.json` (fresh 15 min, revalidated up to 24 h).
+- Sources fetched from 27 list endpoints; results cached to `storage/proxy_cache.json` (fresh 30 min, revalidated up to 24 h).
 - `refresh()` uses cache when fresh; revalidates stale cache up to 24 h; fetches fresh when cache missing, expired, or all cached proxies dead.
 
 ## Persistence
