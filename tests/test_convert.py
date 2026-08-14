@@ -13,30 +13,30 @@ async def seeded_db(tmp_path):
     repo = SearchRepository(db)
     await repo.open()
     await repo.upsert(
-        "SIN|KUL",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "KUL",
-        [{"price": 100}],
-        None,
-        0,
-        True,
-        "t1",
+        route="SIN|KUL",
+        dep_date="2026-08-01",
+        return_date="",
+        flight_type="ONE_WAY",
+        origin="SIN",
+        destination="KUL",
+        flights=[{"price": 100}],
+        error_type=None,
+        retries=0,
+        success=True,
+        searched_at="t1",
     )
     await repo.upsert(
-        "SIN|BKK",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "BKK",
-        [{"price": 90}],
-        None,
-        0,
-        True,
-        "t2",
+        route="SIN|BKK",
+        dep_date="2026-08-01",
+        return_date="",
+        flight_type="ONE_WAY",
+        origin="SIN",
+        destination="BKK",
+        flights=[{"price": 90}],
+        error_type=None,
+        retries=0,
+        success=True,
+        searched_at="t2",
     )
     await repo.flush()
     await repo.close()
@@ -92,17 +92,17 @@ async def test_convert_flushes_buffer_at_boundary(tmp_path, n):
     await repo.open()
     for i in range(n):
         await repo.upsert(
-            f"SIN|KUL{i:04d}",
-            "2026-08-01",
-            "",
-            "ONE_WAY",
-            "SIN",
-            f"KUL{i:04d}",
-            [{"price": i}],
-            None,
-            0,
-            True,
-            f"t{i}",
+            route=f"SIN|KUL{i:04d}",
+            dep_date="2026-08-01",
+            return_date="",
+            flight_type="ONE_WAY",
+            origin="SIN",
+            destination=f"KUL{i:04d}",
+            flights=[{"price": i}],
+            error_type=None,
+            retries=0,
+            success=True,
+            searched_at=f"t{i}",
         )
     await repo.flush()
     await repo.close()
@@ -119,7 +119,17 @@ async def test_convert_null_flights_exports_empty_array(tmp_path):
     repo = SearchRepository(db)
     await repo.open()
     await repo.upsert(
-        "SIN|KUL", "2026-08-01", "", "ONE_WAY", "SIN", "KUL", None, None, 0, True, "t1"
+        route="SIN|KUL",
+        dep_date="2026-08-01",
+        return_date="",
+        flight_type="ONE_WAY",
+        origin="SIN",
+        destination="KUL",
+        flights=None,
+        error_type=None,
+        retries=0,
+        success=True,
+        searched_at="t1",
     )
     await repo.flush()
     await repo.close()

@@ -5,6 +5,7 @@ from curl_cffi import requests
 
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
+from collector.repository import SeedRow
 from fli.models import Airport
 
 _MISSING = object()
@@ -94,6 +95,7 @@ class FakeRepo:
 
     async def upsert(
         self,
+        *,
         route: str,
         dep_date: str,
         return_date: str,
@@ -105,7 +107,7 @@ class FakeRepo:
         retries: int,
         success: bool,
         searched_at: str,
-    ):
+    ) -> None:
         self.upserts.append(
             {
                 "route": route,
@@ -122,7 +124,7 @@ class FakeRepo:
             }
         )
 
-    async def insert_ignore_all(self, tasks: list[tuple[str, str, str, str, str, str]]):
+    async def insert_ignore_all(self, tasks: list[SeedRow]) -> None:
         self.inserted.extend(tasks)
 
     async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:

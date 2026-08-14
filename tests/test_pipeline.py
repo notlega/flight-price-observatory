@@ -16,6 +16,7 @@ from collector.errors import (
 from collector.models import FlightType
 from collector.services.search_pipeline import (
     BulkSearchPipeline,
+    SearchTask,
     _MAX_ATTEMPTS,
     _MIN_POOL_BEFORE_RETRY,
 )
@@ -155,12 +156,14 @@ async def test_search_and_store_success_stores_once():
         rotator=FakeRotator(proxies=[proxy]),
     )
     await pipeline._search_and_store(
-        pipeline.providers[0],
-        SIN,
-        KUL,
-        DEP,
-        None,
-        FlightType.ONE_WAY.value,
+        SearchTask(
+            provider=pipeline.providers[0],
+            origin=SIN,
+            dest=KUL,
+            departure=DEP,
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        ),
         AsyncMock(),
     )
     assert len(pipeline.repo.upserts) == 1
@@ -182,12 +185,14 @@ async def test_search_and_store_retries_then_succeeds():
         )
     )
     await pipeline._search_and_store(
-        pipeline.providers[0],
-        SIN,
-        KUL,
-        DEP,
-        None,
-        FlightType.ONE_WAY.value,
+        SearchTask(
+            provider=pipeline.providers[0],
+            origin=SIN,
+            dest=KUL,
+            departure=DEP,
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        ),
         AsyncMock(),
     )
     assert len(pipeline.repo.upserts) == 1
@@ -202,12 +207,14 @@ async def test_search_and_store_all_fail_stores_failure():
         provider=FakeProvider(script=[ProviderConnectionError("c")] * 3)
     )
     await pipeline._search_and_store(
-        pipeline.providers[0],
-        SIN,
-        KUL,
-        DEP,
-        None,
-        FlightType.ONE_WAY.value,
+        SearchTask(
+            provider=pipeline.providers[0],
+            origin=SIN,
+            dest=KUL,
+            departure=DEP,
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        ),
         AsyncMock(),
     )
     assert len(pipeline.repo.upserts) == 1
@@ -223,12 +230,14 @@ async def test_search_and_store_failure_retries_scale_with_round():
         provider=FakeProvider(script=[ProviderConnectionError("c")] * 3)
     )
     await pipeline._search_and_store(
-        pipeline.providers[0],
-        SIN,
-        KUL,
-        DEP,
-        None,
-        FlightType.ONE_WAY.value,
+        SearchTask(
+            provider=pipeline.providers[0],
+            origin=SIN,
+            dest=KUL,
+            departure=DEP,
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        ),
         AsyncMock(),
         retry_round=1,
     )
@@ -241,12 +250,14 @@ async def test_data_error_not_reported_to_rotator():
         provider=FakeProvider(script=[ProviderDataError("d")] * 3)
     )
     await pipeline._search_and_store(
-        pipeline.providers[0],
-        SIN,
-        KUL,
-        DEP,
-        None,
-        FlightType.ONE_WAY.value,
+        SearchTask(
+            provider=pipeline.providers[0],
+            origin=SIN,
+            dest=KUL,
+            departure=DEP,
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        ),
         AsyncMock(),
     )
     assert pipeline.rotator.failures == []
@@ -257,12 +268,14 @@ async def test_data_error_not_reported_to_rotator():
 async def test_other_error_not_reported_to_rotator():
     pipeline = _make_pipeline(provider=FakeProvider(script=[RuntimeError("boom")] * 3))
     await pipeline._search_and_store(
-        pipeline.providers[0],
-        SIN,
-        KUL,
-        DEP,
-        None,
-        FlightType.ONE_WAY.value,
+        SearchTask(
+            provider=pipeline.providers[0],
+            origin=SIN,
+            dest=KUL,
+            departure=DEP,
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        ),
         AsyncMock(),
     )
     assert pipeline.rotator.failures == []
@@ -287,7 +300,17 @@ async def test_run_batch_records_unexpected_failure():
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
     ):
         await pipeline._run_batch(
-            [(provider, SIN, KUL, DEP, None, FlightType.ONE_WAY.value)], "test"
+            [
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                )
+            ],
+            "test",
         )
     assert pipeline.repo.upserts[-1]["error_type"] == ErrorType.OTHER
     assert pipeline.repo.upserts[-1]["success"] is False
@@ -301,9 +324,30 @@ async def test_run_batch_zero_max_concurrent_processes_all():
     ):
         await pipeline._run_batch(
             [
-                (provider, SIN, KUL, DEP, None, FlightType.ONE_WAY.value),
-                (provider, SIN, KUL, DEP, "2026-08-08", FlightType.ROUND_TRIP.value),
-                (provider, SIN, KUL, DEP, "2026-08-15", FlightType.ROUND_TRIP.value),
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                ),
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date="2026-08-08",
+                    flight_type=FlightType.ROUND_TRIP.value,
+                ),
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date="2026-08-15",
+                    flight_type=FlightType.ROUND_TRIP.value,
+                ),
             ],
             "test",
         )

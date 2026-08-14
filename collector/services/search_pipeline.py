@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -27,7 +28,7 @@ from collector.config import (
     DEFAULT_RATE,
     DEFAULT_WORKERS,
 )
-from collector.repository import SearchRepository
+from collector.repository import SearchRepository, SeedRow
 from collector.routes import RouteCatalog
 from collector.services.progress import ProgressLogger
 from collector.services.rate_limiter import RateLimiter
@@ -39,8 +40,17 @@ _PROGRESS_LOG_STEP_PCT = 5
 _MIN_POOL_BEFORE_RETRY = 20
 _NO_PROXY_DELAY = 0.5
 
-type ProviderTask = tuple[BaseProvider, Airport, Airport, str, str | None, str]
-type SeedRow = tuple[str, str, str, str, str, str]
+
+@dataclass(slots=True, kw_only=True)
+class SearchTask:
+    """One provider + route + date combination to search."""
+
+    provider: BaseProvider
+    origin: Airport
+    dest: Airport
+    departure: str
+    return_date: str | None
+    flight_type: str
 
 
 def _route_key(origin: Airport, dest: Airport) -> str:
@@ -148,21 +158,21 @@ class BulkSearchPipeline:
 
     async def _search_and_store(
         self,
-        provider: BaseProvider,
-        origin: Airport,
-        dest: Airport,
-        departure: str,
-        return_date: str | None,
-        flight_type: str,
+        task: SearchTask,
         session: AsyncSession,
         retry_round: int = 0,
-    ):
+    ) -> None:
         searched_at = datetime.now(timezone.utc).isoformat()
         error_type: str | None = None
 
         for attempt in range(_MAX_ATTEMPTS):
             result = await self._attempt_once(
-                provider, origin, dest, departure, return_date, session
+                task.provider,
+                task.origin,
+                task.dest,
+                task.departure,
+                task.return_date,
+                session,
             )
             error_type = result.error_type
             if (
@@ -172,11 +182,7 @@ class BulkSearchPipeline:
                 await self.rotator.report_failure(result.proxy_info)
             if result.error_type is None:
                 await self._store_result(
-                    origin,
-                    dest,
-                    departure,
-                    return_date,
-                    flight_type,
+                    task,
                     flights=result.flights,
                     error_type=None,
                     retries=attempt + 1,
@@ -188,19 +194,15 @@ class BulkSearchPipeline:
                 "Attempt %d/%d failed for %s->%s on %s via %s: %s",
                 attempt + 1,
                 _MAX_ATTEMPTS,
-                origin.value,
-                dest.value,
-                departure,
+                task.origin.value,
+                task.dest.value,
+                task.departure,
                 result.proxy_info.url if result.proxy_info else "direct",
                 result.error_type,
             )
 
         await self._store_result(
-            origin,
-            dest,
-            departure,
-            return_date,
-            flight_type,
+            task,
             flights=[],
             error_type=error_type,
             retries=(retry_round + 1) * _MAX_ATTEMPTS,
@@ -210,24 +212,21 @@ class BulkSearchPipeline:
 
     async def _store_result(
         self,
-        origin: Airport,
-        dest: Airport,
-        departure: str,
-        return_date: str | None,
-        flight_type: str,
+        task: SearchTask,
+        *,
         flights: list[dict] | None,
         error_type: str | None,
         retries: int,
         success: bool,
         searched_at: str,
-    ):
+    ) -> None:
         await self.repo.upsert(
-            route=_route_key(origin, dest),
-            dep_date=departure,
-            return_date=return_date or "",
-            flight_type=flight_type,
-            origin=origin.value,
-            destination=dest.value,
+            route=_route_key(task.origin, task.dest),
+            dep_date=task.departure,
+            return_date=task.return_date or "",
+            flight_type=task.flight_type,
+            origin=task.origin.value,
+            destination=task.dest.value,
             flights=flights,
             error_type=error_type,
             retries=retries,
@@ -237,10 +236,10 @@ class BulkSearchPipeline:
 
     async def _run_batch(
         self,
-        tasks: list[ProviderTask],
+        tasks: list[SearchTask],
         desc: str,
         retry_round: int = 0,
-    ):
+    ) -> None:
         total = len(tasks)
         queue: asyncio.Queue = asyncio.Queue()
         for task in tasks:
@@ -269,43 +268,22 @@ class BulkSearchPipeline:
             async with AsyncSession() as session:
                 while True:
                     try:
-                        (
-                            provider,
-                            origin,
-                            dest,
-                            departure,
-                            return_date,
-                            flight_type,
-                        ) = queue.get_nowait()
+                        task = queue.get_nowait()
                     except asyncio.QueueEmpty:
                         return
                     try:
                         await self._search_and_store(
-                            provider,
-                            origin,
-                            dest,
-                            departure,
-                            return_date,
-                            flight_type,
-                            session,
-                            retry_round=retry_round,
+                            task, session, retry_round=retry_round
                         )
                     except Exception as e:
                         logger.warning(
                             "Task failed unexpectedly for %s->%s on %s: %s",
-                            origin.value,
-                            dest.value,
-                            departure,
+                            task.origin.value,
+                            task.dest.value,
+                            task.departure,
                             e,
                         )
-                        await self._record_failure(
-                            origin,
-                            dest,
-                            departure,
-                            return_date,
-                            flight_type,
-                            retry_round,
-                        )
+                        await self._record_failure(task, retry_round)
                     finally:
                         done += 1
                         log_progress()
@@ -317,20 +295,12 @@ class BulkSearchPipeline:
 
     async def _record_failure(
         self,
-        origin: Airport,
-        dest: Airport,
-        departure: str,
-        return_date: str | None,
-        flight_type: str,
+        task: SearchTask,
         retry_round: int,
-    ):
+    ) -> None:
         try:
             await self._store_result(
-                origin,
-                dest,
-                departure,
-                return_date,
-                flight_type,
+                task,
                 flights=[],
                 error_type=ErrorType.OTHER,
                 retries=(retry_round + 1) * _MAX_ATTEMPTS,
@@ -340,9 +310,9 @@ class BulkSearchPipeline:
         except Exception:
             logger.exception(
                 "Failed to record failed task %s->%s on %s",
-                origin.value,
-                dest.value,
-                departure,
+                task.origin.value,
+                task.dest.value,
+                task.departure,
             )
 
     async def _get_provider_map(
@@ -373,16 +343,21 @@ class BulkSearchPipeline:
                 )
                 await self.rotator.refresh(force=True)
 
-            retry_tasks: list[
-                tuple[BaseProvider, Airport, Airport, str, str | None, str]
-            ] = []
+            retry_tasks: list[SearchTask] = []
             for route, dep_date, return_date, flight_type in failed:
                 if dep_date < date.today().isoformat():
                     continue
                 if route in provider_map:
                     provider, origin, dest = provider_map[route]
                     retry_tasks.append(
-                        (provider, origin, dest, dep_date, return_date, flight_type)
+                        SearchTask(
+                            provider=provider,
+                            origin=origin,
+                            dest=dest,
+                            departure=dep_date,
+                            return_date=return_date,
+                            flight_type=flight_type,
+                        )
                     )
                 else:
                     logger.warning(
@@ -414,9 +389,10 @@ class BulkSearchPipeline:
         start_date: date,
         effective_end: date,
         today: date,
-        tasks: list[ProviderTask],
-        seed_rows: list[SeedRow],
-    ) -> None:
+    ) -> tuple[list[SearchTask], list[SeedRow]]:
+        tasks: list[SearchTask] = []
+        seed_rows: list[SeedRow] = []
+
         def supports(origin: str, dest: str) -> bool:
             return provider.supports is None or (origin, dest) in provider.supports
 
@@ -430,15 +406,24 @@ class BulkSearchPipeline:
             flight_type = (
                 FlightType.ROUND_TRIP.value if return_date else FlightType.ONE_WAY.value
             )
-            tasks.append((provider, origin, dest, ds, return_date, flight_type))
+            tasks.append(
+                SearchTask(
+                    provider=provider,
+                    origin=origin,
+                    dest=dest,
+                    departure=ds,
+                    return_date=return_date,
+                    flight_type=flight_type,
+                )
+            )
             seed_rows.append(
-                (
-                    _route_key(origin, dest),
-                    ds,
-                    return_date or "",
-                    flight_type,
-                    origin.value,
-                    dest.value,
+                SeedRow(
+                    route=_route_key(origin, dest),
+                    dep_date=ds,
+                    return_date=return_date or "",
+                    flight_type=flight_type,
+                    origin=origin.value,
+                    destination=dest.value,
                 )
             )
 
@@ -464,19 +449,23 @@ class BulkSearchPipeline:
                         (current + timedelta(days=offset)).isoformat(),
                     )
 
+        return tasks, seed_rows
+
     async def _build_tasks(
         self,
         start_date: date,
         effective_end: date,
-    ) -> tuple[list[ProviderTask], list[SeedRow]]:
-        tasks: list[ProviderTask] = []
+    ) -> tuple[list[SearchTask], list[SeedRow]]:
+        tasks: list[SearchTask] = []
         seed_rows: list[SeedRow] = []
         today = date.today()
 
         for provider in self.providers:
-            self._tasks_for_provider(
-                provider, start_date, effective_end, today, tasks, seed_rows
+            provider_tasks, provider_seeds = self._tasks_for_provider(
+                provider, start_date, effective_end, today
             )
+            tasks.extend(provider_tasks)
+            seed_rows.extend(provider_seeds)
 
         return tasks, seed_rows
 

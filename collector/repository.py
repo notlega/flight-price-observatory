@@ -8,12 +8,25 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
+from typing import NamedTuple
 
 from collector.errors import ErrorType
 
 logger = logging.getLogger(__name__)
 
 _BUSY_TIMEOUT_MS = 10000
+
+
+class SeedRow(NamedTuple):
+    """A route to seed in the DB before any search attempt runs."""
+
+    route: str
+    dep_date: str
+    return_date: str
+    flight_type: str
+    origin: str
+    destination: str
+
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS search_results (
@@ -147,6 +160,7 @@ class SearchRepository:
 
     async def upsert(
         self,
+        *,
         route: str,
         dep_date: str,
         return_date: str,
@@ -177,9 +191,7 @@ class SearchRepository:
             )
         )
 
-    async def insert_ignore_all(
-        self, tasks: list[tuple[str, str, str, str, str, str]]
-    ) -> None:
+    async def insert_ignore_all(self, tasks: list[SeedRow]) -> None:
         sql = (
             "INSERT OR IGNORE INTO search_results "
             "(route, dep_date, return_date, flight_type, origin, destination, retries, success) "

@@ -11,6 +11,33 @@ from collector.repository import SearchRepository, _RETRY_ERROR_TYPES
 from collector.services.search_pipeline import _MAX_ATTEMPTS
 
 
+async def _upsert(
+    repo,
+    route,
+    *,
+    flights=None,
+    error_type=None,
+    retries=0,
+    success=True,
+    origin="O",
+    destination="D",
+    searched_at="t",
+):
+    await repo.upsert(
+        route=route,
+        dep_date="2026-08-01",
+        return_date="",
+        flight_type="ONE_WAY",
+        origin=origin,
+        destination=destination,
+        flights=flights,
+        error_type=error_type,
+        retries=retries,
+        success=success,
+        searched_at=searched_at,
+    )
+
+
 async def test_empty_db_queries_return_defaults(repo):
     assert await repo.get_failed(max_retries=3) == []
     assert await repo.count_status() == (0, 0)
@@ -20,17 +47,13 @@ async def test_empty_db_queries_return_defaults(repo):
 @pytest.mark.parametrize("n", [499, 500, 501])
 async def test_writer_auto_flushes_at_batch_boundary(repo, n):
     for i in range(n):
-        await repo.upsert(
-            f"r{i}", "2026-08-01", "", "ONE_WAY", "O", "D", None, "data", 0, False, "t"
-        )
+        await _upsert(repo, f"r{i}", error_type="data", success=False)
     await repo.flush()
     assert await repo.count_failed() == n
 
 
 async def test_iter_successful_raises_on_corrupt_flights_json(repo):
-    await repo.upsert(
-        "r", "2026-08-01", "", "ONE_WAY", "O", "D", [{"p": 1}], None, 0, True, "t"
-    )
+    await _upsert(repo, "r", flights=[{"p": 1}])
     await repo.flush()
     await repo._c.execute(
         "UPDATE search_results SET flights = '{broken' WHERE route = 'r'"
@@ -74,19 +97,7 @@ async def test_close_is_idempotent(repo):
 
 async def test_concurrent_flushes_serialize(repo):
     for i in range(20):
-        await repo.upsert(
-            f"r{i}",
-            "2026-08-01",
-            "",
-            "ONE_WAY",
-            "O",
-            "D",
-            [{"p": i}],
-            None,
-            0,
-            True,
-            "t",
-        )
+        await _upsert(repo, f"r{i}", flights=[{"p": i}])
     await asyncio.gather(repo.flush(), repo.flush(), repo.flush())
     assert await repo.count_successful() == 20
 
@@ -95,9 +106,7 @@ async def test_delete_db_removes_wal_and_shm(tmp_path):
     db = str(tmp_path / "state.db")
     repo = SearchRepository(db)
     await repo.open()
-    await repo.upsert(
-        "r", "2026-08-01", "", "ONE_WAY", "O", "D", [{"p": 1}], None, 0, True, "t"
-    )
+    await _upsert(repo, "r", flights=[{"p": 1}])
     await repo.flush()
     wal, shm = f"{db}-wal", f"{db}-shm"
     existed = os.path.exists(wal) or os.path.exists(shm)
@@ -109,18 +118,13 @@ async def test_delete_db_removes_wal_and_shm(tmp_path):
 
 
 async def test_upsert_flush_counts(repo):
-    await repo.upsert(
+    await _upsert(
+        repo,
         "SIN|KUL",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "KUL",
-        [{"price": 100}],
-        None,
-        0,
-        True,
-        "2026-01-01T00:00:00Z",
+        flights=[{"price": 100}],
+        origin="SIN",
+        destination="KUL",
+        searched_at="2026-01-01T00:00:00Z",
     )
     await repo.flush()
     assert await repo.count_successful() == 1
@@ -128,31 +132,21 @@ async def test_upsert_flush_counts(repo):
 
 
 async def test_upsert_replace_same_primary_key(repo):
-    await repo.upsert(
+    await _upsert(
+        repo,
         "SIN|KUL",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "KUL",
-        [{"price": 100}],
-        None,
-        0,
-        True,
-        "t1",
+        flights=[{"price": 100}],
+        origin="SIN",
+        destination="KUL",
+        searched_at="t1",
     )
-    await repo.upsert(
+    await _upsert(
+        repo,
         "SIN|KUL",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "KUL",
-        [{"price": 200}],
-        None,
-        0,
-        True,
-        "t2",
+        flights=[{"price": 200}],
+        origin="SIN",
+        destination="KUL",
+        searched_at="t2",
     )
     await repo.flush()
     rows = [r async for r in repo.iter_successful()]
@@ -169,7 +163,19 @@ async def test_get_failed_filters_error_types(repo):
         ("r5", "2026-08-01", "O", "D", "data"),
     ]
     for route, dep, o, d, err in seeds:
-        await repo.upsert(route, dep, "", "ONE_WAY", o, d, None, err, 2, False, "t")
+        await repo.upsert(
+            route=route,
+            dep_date=dep,
+            return_date="",
+            flight_type="ONE_WAY",
+            origin=o,
+            destination=d,
+            flights=None,
+            error_type=err,
+            retries=2,
+            success=False,
+            searched_at="t",
+        )
     await repo.flush()
 
     failed = await repo.get_failed(max_retries=3)
@@ -188,12 +194,8 @@ def test_retry_error_types_cover_transient_and_proxy_errors():
 
 
 async def test_get_failed_respects_max_retries(repo):
-    await repo.upsert(
-        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 3, False, "t"
-    )
-    await repo.upsert(
-        "r2", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 4, False, "t"
-    )
+    await _upsert(repo, "r1", error_type="429", retries=3, success=False)
+    await _upsert(repo, "r2", error_type="429", retries=4, success=False)
     await repo.flush()
 
     failed = await repo.get_failed(max_retries=3)
@@ -207,19 +209,7 @@ async def test_get_failed_retry_round_boundaries(repo):
         ("r2", 3 * _MAX_ATTEMPTS),
         ("r3", 4 * _MAX_ATTEMPTS),
     ]:
-        await repo.upsert(
-            route,
-            "2026-08-01",
-            "",
-            "ONE_WAY",
-            "O",
-            "D",
-            None,
-            "data",
-            retries,
-            False,
-            "t",
-        )
+        await _upsert(repo, route, error_type="data", retries=retries, success=False)
     await repo.flush()
 
     assert {r[0] for r in await repo.get_failed(max_retries=1 * _MAX_ATTEMPTS)} == {
@@ -237,15 +227,9 @@ async def test_get_failed_retry_round_boundaries(repo):
 
 
 async def test_count_by_error(repo):
-    await repo.upsert(
-        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 2, False, "t"
-    )
-    await repo.upsert(
-        "r2", "2026-08-01", "", "ONE_WAY", "O", "D", None, "timeout", 2, False, "t"
-    )
-    await repo.upsert(
-        "r3", "2026-08-01", "", "ONE_WAY", "O", "D", None, "429", 2, False, "t"
-    )
+    await _upsert(repo, "r1", error_type="429", retries=2, success=False)
+    await _upsert(repo, "r2", error_type="timeout", retries=2, success=False)
+    await _upsert(repo, "r3", error_type="429", retries=2, success=False)
     await repo.flush()
 
     counts = dict(await repo.count_by_error())
@@ -253,18 +237,8 @@ async def test_count_by_error(repo):
 
 
 async def test_insert_ignore_all_does_not_overwrite(repo):
-    await repo.upsert(
-        "SIN|KUL",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "KUL",
-        [{"price": 100}],
-        None,
-        0,
-        True,
-        "t1",
+    await _upsert(
+        repo, "SIN|KUL", flights=[{"price": 100}], origin="SIN", destination="KUL"
     )
     await repo.flush()
     await repo.insert_ignore_all(
@@ -289,9 +263,7 @@ async def test_close_flushes_pending_batch(tmp_path):
     db = str(tmp_path / "state.db")
     repo = SearchRepository(db)
     await repo.open()
-    await repo.upsert(
-        "r1", "2026-08-01", "", "ONE_WAY", "O", "D", None, "timeout", 0, False, "t"
-    )
+    await _upsert(repo, "r1", error_type="timeout", success=False)
     await repo.close()
 
     reopened = SearchRepository(db)
@@ -302,18 +274,8 @@ async def test_close_flushes_pending_batch(tmp_path):
 
 
 async def test_iter_successful_raw_preserves_json_string(repo):
-    await repo.upsert(
-        "SIN|KUL",
-        "2026-08-01",
-        "",
-        "ONE_WAY",
-        "SIN",
-        "KUL",
-        [{"price": 100}],
-        None,
-        0,
-        True,
-        "t1",
+    await _upsert(
+        repo, "SIN|KUL", flights=[{"price": 100}], origin="SIN", destination="KUL"
     )
     await repo.flush()
     rows = [r async for r in repo.iter_successful_raw()]
