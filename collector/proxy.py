@@ -34,7 +34,7 @@ _TEST_ECHO_URLS = [
     "https://icanhazip.com",
 ]
 
-_TCP_TIMEOUT = 3.0
+_TCP_TIMEOUT = 1.5
 _IPIFY_TIMEOUT = 5.0
 _HTTP_ECHO_TIMEOUT = 5.0
 _TCP_FILTER_LIMIT = 500
