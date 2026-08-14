@@ -395,7 +395,35 @@ async def test_validate_uses_per_worker_sessions():
     ):
         await rot._validate(proxies)
 
-    assert factory.calls == 2
+    assert factory.calls == 5
+
+
+async def test_validate_bounded_by_validate_max_concurrent():
+    class SessionFactory:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self):
+            self.calls += 1
+            return FakeCurlSession()
+
+    proxies = [make_proxy(url=f"http://{i}:1") for i in range(20)]
+    rot = ProxyRotator(max_concurrent=100)
+    factory = SessionFactory()
+
+    async def fake_validate(proxy, session):
+        return proxy
+
+    with (
+        patch("collector.proxy._validate_proxy", side_effect=fake_validate),
+        patch("collector.proxy.AsyncSession", factory),
+        patch("collector.proxy._fetch_real_ip", return_value=""),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
+        patch("collector.proxy._VALIDATE_MAX_CONCURRENT", 3),
+    ):
+        await rot._validate(proxies)
+
+    assert factory.calls == 3
 
 
 async def test_validate_bounded_workers():

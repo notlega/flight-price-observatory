@@ -39,6 +39,7 @@ _IPIFY_TIMEOUT = 5.0
 _HTTP_ECHO_TIMEOUT = 5.0
 _TCP_FILTER_LIMIT = 500
 _VALIDATE_TARGET = 100
+_VALIDATE_MAX_CONCURRENT = 50
 _VALIDATE_LOG_STEP_PCT = 10
 
 _RATE_LIMIT_COOLDOWN = 120
@@ -53,7 +54,7 @@ _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
 _FETCH_TIMEOUT = 10
 _REFILL_MAX_PER_SOURCE = 500
-_ALIVE_TO_VALID_MULTIPLIER = 40
+_ALIVE_TO_VALID_MULTIPLIER = 30
 
 
 def _build_sources() -> list[tuple[str, str]]:
@@ -508,7 +509,7 @@ class ProxyRotator:
                             ),
                         )
 
-        n_workers = min(max(self._max_concurrent, 1), max(len(proxies), 1))
+        n_workers = min(max(_VALIDATE_MAX_CONCURRENT, 1), max(len(proxies), 1))
         for _ in range(n_workers):
             queue.put_nowait(None)
         workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
