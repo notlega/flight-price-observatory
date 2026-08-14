@@ -85,7 +85,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 | Progress        | log lines         | Periodic %/rate/ETA progress in logs       |
 | Scheduler       | GitHub Actions    | Cron, no infra                              |
 | Package mgmt    | uv                | Fast, reproducible                          |
-| Testing         | pytest + ruff + basedpyright + coverage | 288 tests, 97% cov |
+| Testing         | pytest + ruff + basedpyright + coverage | 289 tests, 97% cov |
 | Storage         | Cloudflare R2     | S3-compatible, free 10 GB, pay after        |
 | Query           | DuckDB            | SQL over Parquet, no server                 |
 | Viz             | Streamlit + Plotly| (Future) interactive dashboard              |

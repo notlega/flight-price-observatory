@@ -9,6 +9,15 @@
 5. **Failure is data.** 429 / timeout / no-proxy / data errors are recorded in SQLite with retry counts, not swallowed. `get_failed()` drives the retry loop; `count_by_error()` gives the failure taxonomy.
 6. **Explicit error taxonomy.** `collector/errors.py` maps transport errors to typed exceptions (`ProviderTimeoutError`, `ProviderConnectionError`, `ProviderRateLimitedError`, `ProviderDataError`) so the pipeline can act on them without string matching.
 
+## Code structure
+
+- **`SearchTask`** (`collector/services/search_pipeline.py`) is a `@dataclass(slots=True, kw_only=True)` describing one provider + route + date combination; it flows through building, batching, and retries instead of 6-arg tuple unpacking.
+- **`SeedRow`** (`collector/repository.py`) is a `NamedTuple` for DB seeding writes.
+- **`repository.upsert()`** is keyword-only — 11 positional args would be unreadable at call sites.
+- **Shared defaults** live in `collector/config.py` (currency, horizon, rate, workers, DB path) and are imported by the CLI, manager, and pipeline.
+- **`ProgressLogger`** (`collector/services/progress.py`) is the single percent-step log implementation used by both the pipeline batch loop and proxy validation.
+- **Worker isolation:** batch workers run under `asyncio.gather(..., return_exceptions=True)`; a crashing worker is logged without abandoning remaining tasks.
+
 ## Retry semantics
 
 - 3 retry rounds.
@@ -31,7 +40,7 @@
 - **Factories:** `tests/libs/factories.py` — `make_proxy`, `make_flights` for data setup.
 - **Lifecycle:** `conftest.py` owns the opened repo fixture with teardown; tests never open/close manually.
 - **Determinism:** `pytest-randomly` shuffles order each run; `filterwarnings=error` fails on leaked resources; `--strict-markers` catches typo'd markers.
-- **Gate:** `fail_under = 80` coverage; current 97% (288 tests).
+- **Gate:** `fail_under = 80` coverage; current 97% (289 tests).
 
 ## Cost control
 
