@@ -15,6 +15,7 @@ import httpx
 from curl_cffi.requests import AsyncSession
 
 from collector.models.proxy import ProxyInfo
+from collector.services.progress import ProgressLogger
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ _IPIFY_TIMEOUT = 5.0
 _HTTP_ECHO_TIMEOUT = 5.0
 _TCP_FILTER_LIMIT = 500
 _VALIDATE_TARGET = 100
+_VALIDATE_LOG_STEP_PCT = 10
 
 _RATE_LIMIT_COOLDOWN = 120
 _MAX_429_EVICTIONS = 3
@@ -434,10 +436,12 @@ class ProxyRotator:
 
         valid: list[ProxyInfo] = []
         checked = 0
-        next_log_pct = 10
+        progress = ProgressLogger(
+            logger, step_pct=_VALIDATE_LOG_STEP_PCT, level=logging.DEBUG
+        )
 
         async def worker():
-            nonlocal checked, next_log_pct
+            nonlocal checked
             async with AsyncSession() as session:
                 while True:
                     if target is not None and len(valid) >= target:
@@ -451,15 +455,13 @@ class ProxyRotator:
                             valid.append(result)
                     finally:
                         checked += 1
-                        pct = checked * 100 // len(proxies)
-                        if pct >= next_log_pct:
-                            logger.debug(
-                                "Validated %d/%d proxies (%d%%)",
-                                checked,
-                                len(proxies),
-                                pct,
-                            )
-                            next_log_pct = pct + 10
+                        progress.maybe_log(
+                            checked,
+                            len(proxies),
+                            lambda pct, done, total, _: (
+                                f"Validated {done}/{total} proxies ({pct}%)"
+                            ),
+                        )
 
         n_workers = min(max(self._max_concurrent, 1), max(len(proxies), 1))
         for _ in range(n_workers):
@@ -662,10 +664,11 @@ class ProxyRotator:
             proxy.rate_limit_until = time.monotonic() + seconds
             self._weight_pool_len = 0
             logger.debug(
-                "Proxy %s rate-limited; parked for %.0fs (%d/3)",
+                "Proxy %s rate-limited; parked for %.0fs (%d/%d)",
                 proxy.url,
                 seconds,
                 proxy.rate_limited_count,
+                _MAX_429_EVICTIONS,
             )
 
     def working_count(self) -> int:

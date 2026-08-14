@@ -3,6 +3,13 @@
 import logging
 from datetime import date
 
+from collector.config import (
+    DEFAULT_CURRENCY,
+    DEFAULT_DB_PATH,
+    DEFAULT_MAX_DAYS_AHEAD,
+    DEFAULT_RATE,
+    DEFAULT_WORKERS,
+)
 from collector.providers.base import BaseProvider
 from collector.registry import ProviderRegistry
 from collector.services.search_pipeline import BulkSearchPipeline
@@ -18,11 +25,11 @@ class CollectorManager:
         self,
         start_date: date,
         end_date: date,
-        max_days_ahead: int = 330,
-        currency: str = "SGD",
-        rate: float = 200,
-        workers: int = 50,
-        db_path: str = "storage/db/search_state.db",
+        max_days_ahead: int = DEFAULT_MAX_DAYS_AHEAD,
+        currency: str = DEFAULT_CURRENCY,
+        rate: float = DEFAULT_RATE,
+        workers: int = DEFAULT_WORKERS,
+        db_path: str = DEFAULT_DB_PATH,
         keep_db: bool = False,
     ):
         """Collect flight prices for all providers over the date range.

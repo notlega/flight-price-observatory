@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any
 
+from collector.config import DEFAULT_DB_PATH
 from collector.convert import convert
 
 
@@ -11,8 +12,8 @@ def configure_parser(subparsers: Any):
     p.add_argument(
         "--db",
         type=str,
-        default="storage/db/search_state.db",
-        help="Path to SQLite state file (default: storage/db/search_state.db)",
+        default=DEFAULT_DB_PATH,
+        help=f"Path to SQLite state file (default: {DEFAULT_DB_PATH})",
     )
     p.add_argument(
         "--output",

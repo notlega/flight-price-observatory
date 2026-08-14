@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import time
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -21,13 +20,22 @@ from collector.models.flight_type import FlightType
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
 from collector.proxy import ProxyRotator
+from collector.config import (
+    DEFAULT_CURRENCY,
+    DEFAULT_DB_PATH,
+    DEFAULT_MAX_DAYS_AHEAD,
+    DEFAULT_RATE,
+    DEFAULT_WORKERS,
+)
 from collector.repository import SearchRepository
 from collector.routes import RouteCatalog
+from collector.services.progress import ProgressLogger
 from collector.services.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
+_PROGRESS_LOG_STEP_PCT = 5
 _MIN_POOL_BEFORE_RETRY = 20
 _NO_PROXY_DELAY = 0.5
 
@@ -71,10 +79,10 @@ class BulkSearchPipeline:
     def __init__(
         self,
         providers: list[BaseProvider],
-        rate: float = 200,
-        max_concurrent: int = 50,
-        db_path: str = "storage/db/search_state.db",
-        currency: str = "SGD",
+        rate: float = DEFAULT_RATE,
+        max_concurrent: int = DEFAULT_WORKERS,
+        db_path: str = DEFAULT_DB_PATH,
+        currency: str = DEFAULT_CURRENCY,
         keep_db: bool = False,
     ):
         self.providers = providers
@@ -238,34 +246,26 @@ class BulkSearchPipeline:
         for task in tasks:
             queue.put_nowait(task)
 
-        started = time.monotonic()
         done = 0
-        next_log_pct = 5
+        progress = ProgressLogger(logger, step_pct=_PROGRESS_LOG_STEP_PCT)
 
         def log_progress(final: bool = False) -> None:
-            nonlocal next_log_pct
-            pct = done * 100 // total if total else 100
-            if not final and pct < next_log_pct:
-                return
-            elapsed = time.monotonic() - started
-            if done:
-                rate = done / elapsed
-                eta = (total - done) / rate if rate > 0 else 0.0
-                stats = f"{rate:.1f}/s | {_format_duration(elapsed)} elapsed | {_format_duration(eta)} ETA"
-            else:
-                stats = f"n/a | {_format_duration(elapsed)} elapsed | n/a ETA"
-            logger.info(
-                "%s: %d%% (%d/%d) [%s]",
-                desc,
-                pct,
-                done,
-                total,
-                stats,
-            )
-            next_log_pct = pct + 5
+            def render(pct: int, done: int, total: int, elapsed: float) -> str:
+                if done:
+                    rate = done / elapsed
+                    eta = (total - done) / rate if rate > 0 else 0.0
+                    stats = (
+                        f"{rate:.1f}/s | {_format_duration(elapsed)} elapsed "
+                        f"| {_format_duration(eta)} ETA"
+                    )
+                else:
+                    stats = f"n/a | {_format_duration(elapsed)} elapsed | n/a ETA"
+                return f"{desc}: {pct}% ({done}/{total}) [{stats}]"
+
+            progress.maybe_log(done, total, render, force=final)
 
         async def worker():
-            nonlocal done, next_log_pct
+            nonlocal done
             async with AsyncSession() as session:
                 while True:
                     try:
@@ -484,7 +484,7 @@ class BulkSearchPipeline:
         self,
         start_date: date,
         end_date: date,
-        max_days_ahead: int = 330,
+        max_days_ahead: int = DEFAULT_MAX_DAYS_AHEAD,
     ):
         """Run the full bulk search lifecycle.
 

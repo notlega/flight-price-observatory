@@ -5,6 +5,12 @@ from datetime import date, timedelta
 from typing import Any
 
 from collector import CollectorManager, ProviderRegistry
+from collector.config import (
+    DEFAULT_CURRENCY,
+    DEFAULT_MAX_DAYS_AHEAD,
+    DEFAULT_RATE,
+    DEFAULT_WORKERS,
+)
 
 
 def configure_parser(subparsers: Any):
@@ -18,26 +24,26 @@ def configure_parser(subparsers: Any):
     p.add_argument(
         "--max-days",
         type=int,
-        default=330,
-        help="Max days ahead from start (default: 330)",
+        default=DEFAULT_MAX_DAYS_AHEAD,
+        help=f"Max days ahead from start (default: {DEFAULT_MAX_DAYS_AHEAD})",
     )
     p.add_argument(
         "--currency",
         type=str,
-        default="SGD",
-        help="Currency code for pricing (default: SGD)",
+        default=DEFAULT_CURRENCY,
+        help=f"Currency code for pricing (default: {DEFAULT_CURRENCY})",
     )
     p.add_argument(
         "--rate",
         type=float,
-        default=200,
-        help="Requests per second (default: 200)",
+        default=DEFAULT_RATE,
+        help=f"Requests per second (default: {DEFAULT_RATE})",
     )
     p.add_argument(
         "--workers",
         type=int,
-        default=50,
-        help="Max concurrent searches (default: 50)",
+        default=DEFAULT_WORKERS,
+        help=f"Max concurrent searches (default: {DEFAULT_WORKERS})",
     )
     p.add_argument(
         "--keep-db",
