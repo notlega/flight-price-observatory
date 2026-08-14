@@ -87,7 +87,7 @@ class SearchRepository:
             await self._migrate()
             await conn.execute(_CREATE_SQL)
             await conn.commit()
-        except BaseException:
+        except Exception:
             await conn.close()
             self._conn = None
             raise
@@ -105,24 +105,25 @@ class SearchRepository:
         while True:
             item = await self._q.get()
             if item is _STOP:
-                if batch:
-                    await self._c.executemany(_INSERT_SQL, batch)
-                    await self._c.commit()
+                await self._commit(batch)
                 self._q.task_done()
                 return
             if item is _FLUSH:
-                if batch:
-                    await self._c.executemany(_INSERT_SQL, batch)
-                    await self._c.commit()
-                    batch.clear()
+                await self._commit(batch)
+                batch.clear()
                 self._q.task_done()
                 continue
             batch.append(item)
             if len(batch) >= _WRITE_BATCH_SIZE:
-                await self._c.executemany(_INSERT_SQL, batch)
-                await self._c.commit()
+                await self._commit(batch)
                 batch.clear()
             self._q.task_done()
+
+    async def _commit(self, batch: list[tuple]) -> None:
+        if not batch:
+            return
+        await self._c.executemany(_INSERT_SQL, batch)
+        await self._c.commit()
 
     async def flush(self):
         """Commit all queued writes (await the writer draining the queue)."""

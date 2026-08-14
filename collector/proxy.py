@@ -12,7 +12,7 @@ from bisect import bisect_left
 from pathlib import Path
 
 import httpx
-from curl_cffi.requests import AsyncSession, exceptions
+from curl_cffi.requests import AsyncSession
 
 from collector.models.proxy import ProxyInfo
 
@@ -274,20 +274,8 @@ async def _probe_url(
             proxies={"all": proxy_url},
             timeout=timeout,
         )
-    except exceptions.Timeout:
-        logger.debug("Proxy %s timeout on %s", proxy_url, url)
-        return None
-    except exceptions.ProxyError as e:
-        logger.debug("Proxy %s proxy_error on %s: %s", proxy_url, url, e)
-        return None
-    except exceptions.SSLError as e:
-        logger.debug("Proxy %s tls failure on %s: %s", proxy_url, url, e)
-        return None
-    except exceptions.ConnectionError as e:
-        logger.debug("Proxy %s connect failure on %s: %s", proxy_url, url, e)
-        return None
     except Exception as e:
-        logger.debug("Proxy %s other failure on %s: %s", proxy_url, url, e)
+        logger.debug("Proxy %s failure on %s: %s", proxy_url, url, e)
         return None
 
     latency = (time.monotonic() - t0) * 1000
@@ -518,34 +506,8 @@ class ProxyRotator:
         """
         cap = self._max_per_source if max_per_source is None else max_per_source
         logger.info("Fetching proxy lists from %d sources...", len(_PROXY_SOURCES))
-        if not force:
-            cached = _load_cache()
-            if cached is not None:
-                cached_at, cached_proxies = cached
-                age = time.time() - cached_at
-                if age < _CACHE_FRESH_TTL:
-                    excluded = self._active_blacklist()
-                    filtered = [p for p in cached_proxies if p.url not in excluded]
-                    if len(filtered) > self.usable_count():
-                        await self._set_pool(filtered)
-                    logger.info(
-                        "Proxy cache fresh (%.0fs old): %d proxies (%d blacklisted)",
-                        age,
-                        len(filtered),
-                        len(cached_proxies) - len(filtered),
-                    )
-                    return
-                if age < _CACHE_MAX_AGE:
-                    logger.info(
-                        "Proxy cache stale (%.0fs old); revalidating %d cached proxies",
-                        age,
-                        len(cached_proxies),
-                    )
-                    valid = await self._validate(cached_proxies)
-                    if valid:
-                        await self._apply_valid(valid, len(cached_proxies))
-                        return
-                    logger.warning("All cached proxies dead; fetching fresh")
+        if not force and await self._refresh_from_cache():
+            return
 
         all_proxies = await _parse_all_sources(max_per_source=cap)
         if not all_proxies:
@@ -558,6 +520,42 @@ class ProxyRotator:
 
         valid = await self._validate(all_proxies, target=_VALIDATE_TARGET)
         await self._apply_valid(valid, len(all_proxies))
+
+    async def _refresh_from_cache(self) -> bool:
+        """Apply cached proxies when fresh, else revalidate when stale.
+
+        Returns:
+            True when the cache settled the pool, False when a full fetch is needed.
+        """
+        cached = _load_cache()
+        if cached is None:
+            return False
+        cached_at, cached_proxies = cached
+        age = time.time() - cached_at
+        if age < _CACHE_FRESH_TTL:
+            excluded = self._active_blacklist()
+            filtered = [p for p in cached_proxies if p.url not in excluded]
+            if len(filtered) > self.usable_count():
+                await self._set_pool(filtered)
+            logger.info(
+                "Proxy cache fresh (%.0fs old): %d proxies (%d blacklisted)",
+                age,
+                len(filtered),
+                len(cached_proxies) - len(filtered),
+            )
+            return True
+        if age < _CACHE_MAX_AGE:
+            logger.info(
+                "Proxy cache stale (%.0fs old); revalidating %d cached proxies",
+                age,
+                len(cached_proxies),
+            )
+            valid = await self._validate(cached_proxies)
+            if valid:
+                await self._apply_valid(valid, len(cached_proxies))
+                return True
+            logger.warning("All cached proxies dead; fetching fresh")
+        return False
 
     def _pick(self) -> ProxyInfo | None:
         now = time.monotonic()
