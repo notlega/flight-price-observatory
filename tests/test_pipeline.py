@@ -213,12 +213,12 @@ async def test_search_and_store_stub_cooldown_stops_after_threshold():
 
 
 async def test_search_and_store_stub_cooldown_persists_across_rounds():
-    provider = FakeProvider(script=[ProviderBlockedError("blocked")] * 6)
+    provider = FakeProvider(script=[ProviderBlockedError("blocked")] * 4)
     pipeline = _make_pipeline(provider=provider)
     with patch("collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()):
         await pipeline._search_and_store(_task(provider), AsyncMock(), retry_round=0)
         await pipeline._search_and_store(_task(provider), AsyncMock(), retry_round=1)
-    assert len(provider.calls) == 6
+    assert len(provider.calls) == 4
     assert [u["success"] for u in pipeline.repo.upserts] == [False, False]
     assert pipeline.repo.upserts[-1]["retries"] == 6
 

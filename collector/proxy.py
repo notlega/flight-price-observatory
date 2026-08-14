@@ -53,7 +53,7 @@ _AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
 _FETCH_TIMEOUT = 10
-_REFILL_MAX_PER_SOURCE = 500
+_REFILL_MAX_PER_SOURCE = 750
 _ALIVE_TO_VALID_MULTIPLIER = 30
 
 
@@ -216,7 +216,9 @@ async def _parse_source(
         if url_str is None:
             continue
         proto = url_str.split("://", 1)[0]
-        proxies.append(ProxyInfo(url=url_str, protocol=proto))
+        proxies.append(
+            ProxyInfo(url=url_str, protocol=proto, source=url.split("://", 1)[-1])
+        )
     return proxies
 
 
@@ -285,6 +287,13 @@ async def _fetch_real_ip() -> str:
     except Exception as e:
         logger.debug("Failed to fetch real IP: %s", e)
     return ""
+
+
+def _count_by_source(proxies: list[ProxyInfo]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for p in proxies:
+        counts[p.source] = counts.get(p.source, 0) + 1
+    return counts
 
 
 def _log_probe_status(proxy_url: str, url: str, status: int) -> None:
@@ -439,7 +448,7 @@ class ProxyRotator:
     def __init__(
         self,
         max_concurrent: int = 200,
-        max_per_source: int = 1500,
+        max_per_source: int = 2500,
     ):
         self._proxies: list[ProxyInfo] = []
         self._index = 0
@@ -464,6 +473,7 @@ class ProxyRotator:
             return []
 
         logger.debug("TCP prefiltering %d proxies", len(proxies))
+        input_by_source = _count_by_source(proxies)
         alive_target = (target if target is not None else _VALIDATE_TARGET) * (
             _ALIVE_TO_VALID_MULTIPLIER
         )
@@ -516,6 +526,23 @@ class ProxyRotator:
         await asyncio.gather(*workers)
 
         valid.sort(key=lambda p: p.quality_score, reverse=True)
+        alive_by_source = _count_by_source(alive)
+        valid_by_source = _count_by_source(valid)
+        sources = sorted(
+            set(input_by_source) | set(alive_by_source) | set(valid_by_source)
+        )
+        if len(sources) > 1:
+            logger.info(
+                "Proxy source yield (candidates/alive/valid): %s",
+                {
+                    s: (
+                        input_by_source.get(s, 0),
+                        alive_by_source.get(s, 0),
+                        valid_by_source.get(s, 0),
+                    )
+                    for s in sources
+                },
+            )
         return valid
 
     async def _set_pool(self, proxies: list[ProxyInfo]) -> None:

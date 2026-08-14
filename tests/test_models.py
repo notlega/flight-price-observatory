@@ -23,6 +23,7 @@ def test_proxy_to_dict_keys():
         "rate_limit_until": 0.0,
         "rate_limited_count": 0,
         "stub_count": 0,
+        "source": "",
     }
 
 

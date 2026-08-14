@@ -9,6 +9,7 @@ def make_proxy(
     last_validated: float = 0.0,
     rate_limited_count: int = 0,
     stub_count: int = 0,
+    source: str = "",
 ) -> ProxyInfo:
     return ProxyInfo(
         url=url,
@@ -18,6 +19,7 @@ def make_proxy(
         last_validated=last_validated,
         rate_limited_count=rate_limited_count,
         stub_count=stub_count,
+        source=source,
     )
 
 

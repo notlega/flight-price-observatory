@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -573,6 +574,31 @@ async def test_validate_prefilter_early_exit_respects_alive_target():
     assert len(valid) == 2
 
 
+async def test_validate_logs_source_yield(caplog):
+    rot = ProxyRotator(max_concurrent=2)
+    proxies = [
+        make_proxy(url="http://0:1", source="a.example"),
+        make_proxy(url="http://1:1", source="a.example"),
+        make_proxy(url="http://2:1", source="b.example"),
+    ]
+
+    async def fake_validate(proxy, session):
+        proxy.quality_score = 1.3
+        return proxy
+
+    with (
+        patch("collector.proxy._validate_proxy", side_effect=fake_validate),
+        patch("collector.proxy.AsyncSession", new=FakeCurlSession),
+        patch("collector.proxy._prefilter_tcp", side_effect=lambda ps: ps),
+        caplog.at_level(logging.INFO, logger="collector.proxy"),
+    ):
+        await rot._validate(proxies, target=10)
+
+    assert "Proxy source yield" in caplog.text
+    assert "'a.example': (2, 2, 2)" in caplog.text
+    assert "'b.example': (1, 1, 1)" in caplog.text
+
+
 async def test_tcp_alive_true_for_reachable():
     writer = Mock()
     writer.close = Mock()
@@ -814,7 +840,7 @@ async def test_auto_refresh_prefers_cache():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
     assert rot.working_count() == 20
 
 
@@ -831,8 +857,8 @@ async def test_auto_refresh_falls_back_when_cache_dead():
         await rot._auto_refresh()
 
     assert calls == [
-        {"max_per_source": 500},
-        {"force": True, "max_per_source": 500},
+        {"max_per_source": 750},
+        {"force": True, "max_per_source": 750},
     ]
     assert rot.working_count() == 1
 
@@ -850,7 +876,7 @@ async def test_auto_refresh_partial_pool_skips_refill():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
     assert rot.working_count() == 15
 
 
@@ -865,7 +891,7 @@ async def test_auto_refresh_skips_refill_when_pool_ok():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
 
 
 async def test_auto_refresh_cooldown_blocks_refill():
@@ -880,7 +906,7 @@ async def test_auto_refresh_cooldown_blocks_refill():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
 
 
 async def test_auto_refresh_gap_skips_repeated_attempts():
@@ -911,12 +937,12 @@ async def test_auto_refresh_empty_pool_escalates_backoff():
             rot._last_force_refresh = float("-inf")
 
     assert calls == [
-        {"max_per_source": 500},
-        {"force": True, "max_per_source": 500},
-        {"max_per_source": 500},
-        {"force": True, "max_per_source": 500},
-        {"max_per_source": 500},
-        {"force": True, "max_per_source": 500},
+        {"max_per_source": 750},
+        {"force": True, "max_per_source": 750},
+        {"max_per_source": 750},
+        {"force": True, "max_per_source": 750},
+        {"max_per_source": 750},
+        {"force": True, "max_per_source": 750},
     ]
     assert rot._consecutive_force_refetches == 3
 
@@ -933,7 +959,7 @@ async def test_auto_refresh_backoff_cooldown_blocks_escalated_refetch():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
     assert rot._consecutive_force_refetches == 3
 
 
@@ -949,7 +975,7 @@ async def test_auto_refresh_resets_backoff_when_pool_recovers():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
     assert rot._consecutive_force_refetches == 0
 
 
@@ -996,7 +1022,7 @@ async def test_auto_refresh_partial_recovery_resets_backoff():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
     assert rot._consecutive_force_refetches == 0
 
 
@@ -1013,8 +1039,8 @@ async def test_auto_refresh_backoff_caps_at_longest_interval():
         await rot._auto_refresh()
 
     assert calls == [
-        {"max_per_source": 500},
-        {"force": True, "max_per_source": 500},
+        {"max_per_source": 750},
+        {"force": True, "max_per_source": 750},
     ]
     assert rot._consecutive_force_refetches == 11
 
@@ -1116,7 +1142,7 @@ async def test_auto_refresh_first_call_not_gap_blocked():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls[0] == {"max_per_source": 500}
+    assert calls[0] == {"max_per_source": 750}
 
 
 async def test_auto_refresh_gap_resets_after_elapsed():
@@ -1146,7 +1172,7 @@ async def test_auto_refresh_at_threshold_no_force():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
 
-    assert calls == [{"max_per_source": 500}]
+    assert calls == [{"max_per_source": 750}]
 
 
 async def test_get_proxy_storm_throttled():
