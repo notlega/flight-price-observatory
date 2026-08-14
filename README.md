@@ -55,7 +55,7 @@ flowchart TD
     PIPE --> ROT["ProxyRotator<br/>2-phase validate TCP|HTTP echo, weighted select"]
     PIPE --> RL["RateLimiter<br/>adaptive token bucket, halve on 429 burst, double on clean 60s"]
     PIPE --> SQL["SQLite aiosqlite<br/>upsert intermediary, track retries"]
-    PIPE --> RETRY["Retry loop x3<br/>re-query 429s with fresh proxies"]
+    PIPE --> RETRY["Retry loop x3<br/>cumulative attempt budget (retries <= r x 3)"]
     PIPE --> CONV["Convert to JSONL<br/>write, delete SQLite DB"]
 
     SQL --> CONV
@@ -85,7 +85,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 | Progress        | log lines         | Periodic %/rate/ETA progress in logs       |
 | Scheduler       | GitHub Actions    | Cron, no infra                              |
 | Package mgmt    | uv                | Fast, reproducible                          |
-| Testing         | pytest + ruff + basedpyright + coverage | 110 tests, 91% cov |
+| Testing         | pytest + ruff + basedpyright + coverage | 288 tests, 97% cov |
 | Storage         | Cloudflare R2     | S3-compatible, free 10 GB, pay after        |
 | Query           | DuckDB            | SQL over Parquet, no server                 |
 | Viz             | Streamlit + Plotly| (Future) interactive dashboard              |
@@ -159,7 +159,8 @@ uv run python -m cli search --start 2026-07-11 --max-days 90
 # Currency + rate/concurrency tuning
 uv run python -m cli search --currency USD --rate 5 --workers 10
 
-# Verbose debug
+# Verbose debug (global flag, before or after subcommand)
+uv run python -m cli -v search
 uv run python -m cli search --verbose
 
 # Convert existing SQLite to JSONL (default: delete DB after)
@@ -182,7 +183,8 @@ uv run lint
 | `--currency`| SGD     | Currency code for pricing |
 | `--rate`    | 200     | Requests per second  |
 | `--workers` | 50     | Max concurrent searches |
-| `--verbose` | False   | Debug logging        |
+| `--keep-db` | False   | Keep SQLite state file after JSONL export |
+| `-v`        | False   | Debug logging (global, also after subcommand) |
 
 `convert` flags:
 

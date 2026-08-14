@@ -14,15 +14,15 @@ Intermediary store for collected searches. Async writes, WAL journal, `INSERT OR
 | `destination`| TEXT  | IATA code |
 | `flights`   | TEXT   | JSON array of flight rows (serialized string) |
 | `error_type`| TEXT   | ErrorType enum value, NULL on success |
-| `retries`   | INTEGER| Retry count, default 0 |
+| `retries`   | INTEGER| Cumulative attempts consumed (1-based), default 0 |
 | `success`   | BOOL   | 1 if search returned flights |
 | `searched_at`| TEXT  | ISO timestamp |
 
 Semantics:
 
-- **Success row:** `success=1`, `flights` holds JSON. Absent if no flights found.
-- **Failure row:** `success=0`, `error_type` set, `retries` tracks attempts. Used by `get_failed(max_retries)` to feed retry loop.
-- **Retryable errors:** `rate_limited`, `timeout`, `connection`, `no_proxy` (see `_RETRY_ERROR_TYPES`). `data` errors are not retried; 429 never exhausts retries within a run.
+- **Success row:** `success=1`, `flights` holds JSON. Absent if no flights found. `retries` = attempt that succeeded (1..3).
+- **Failure row:** `success=0`, `error_type` set, `retries` = `round * 3` after a round's attempts are exhausted. `get_failed(max_retries)` feeds the retry loop with `retries <= max_retries`.
+- **Retryable errors:** `rate_limited`, `timeout`, `connection`, `no_proxy`, `data` (see `_RETRY_ERROR_TYPES`). Round *r* queries `retries <= r * 3`, giving every round a fresh 3-attempt budget.
 
 ## JSONL output (`storage/raw/search_*.jsonl`)
 

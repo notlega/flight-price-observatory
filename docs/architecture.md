@@ -32,7 +32,7 @@ flowchart TD
 
     PIPE --> RL["RateLimiter.acquire()<br/>per request"]
     PIPE --> REPO["repository.upsert()<br/>async write queue, WAL"]
-    PIPE --> RETRY["_retry_loop()<br/>3 rounds on 429 / no_proxy / data"]
+    PIPE --> RETRY["_retry_loop()<br/>3 rounds, cumulative attempt budget (retries <= r x 3)"]
     PIPE --> STORE["_store_result() / _record_failure()"]
 
     REPO --> STORE
@@ -48,8 +48,8 @@ flowchart TD
    - rate-limit acquire,
    - pick proxy (`_get_provider_map` -> `rotator.get_proxy()`; empty -> `_auto_refresh`),
    - `provider.search(...)`, map exceptions to `AttemptResult`.
-5. Success -> `_store_result()` -> `repository.upsert()`. Failure -> `_record_failure()` increments retry counters.
-6. `_retry_loop(3)` re-runs failures, distributing them round-robin across providers; failed attempts with retries < 3 are rejected (429 excluded from retry exhaust).
+5. Success -> `_store_result()` -> `repository.upsert()`. Failure -> `_record_failure()` stores the attempt count (1-based, up to 3 per round).
+6. `_retry_loop(3)` re-runs failures, distributing them round-robin across providers. Round *r* selects rows with `retries <= r * 3` (see [design.md](design.md#retry-semantics)); routes no provider covers are skipped with a WARNING.
 7. `convert()` writes SQLite -> JSONL, then deletes the DB (unless `--keep-db`).
 
 ### Rate limiting
@@ -59,6 +59,7 @@ Adaptive token bucket (`collector/services/rate_limiter.py`):
 - `acquire()` waits until `now - last_request >= 1/rate`.
 - `report_429()` halves the rate (min 0.5/s) when a 429 burst exceeds 20% of the expected rate in a 30s window.
 - `report_success()` doubles it back, but only after a clean 60s window.
+- `__init__` validates config: `max_rate`/`min_rate` must be positive and `min_rate <= max_rate`, else `ValueError`. Zero `max_concurrent` is clamped to 1 worker.
 
 ### Proxy rotation (`collector/proxy.py`)
 
@@ -73,6 +74,8 @@ Adaptive token bucket (`collector/services/rate_limiter.py`):
 ## Persistence
 
 - Intermediary: SQLite via `aiosqlite`, WAL journal, async write queue with batching, flush/stop sentinels.
+- `open()` validates the file with a synchronous `sqlite3` probe before spawning the aiosqlite worker thread — corrupt/unreadable DB fails fast (`DatabaseError`) instead of leaking the worker thread.
+- `flush()`/`close()` await the writer only after the batch is committed (`task_done()` fires post-commit), so callers never read pre-commit state.
 - Final: JSONL in `storage/raw/`, one line per successful route search. Flights embedded as JSON string.
 
 See [data-model.md](data-model.md).
@@ -83,5 +86,6 @@ See [data-model.md](data-model.md).
 - ADR-0002 Parquet for processed tier
 - ADR-0003 provider abstraction
 - ADR-0004 proxy reliability hardening
+- ADR-0005 pipeline hardening (retries, CLI, persistence)
 
 Full records: [docs/decisions/](decisions/)

@@ -12,10 +12,11 @@
 ## Retry semantics
 
 - 3 retry rounds.
-- Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderTimeoutError`, `ProviderConnectionError`, `ProviderDataError`, `no_proxy`. Data errors may be transient (e.g. parse hiccups) so they are retried, but they never trigger proxy `report_failure`.
+- Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderTimeoutError`, `ProviderConnectionError`, `ProviderDataError`, `no_proxy` (see `_RETRY_ERROR_TYPES`). Data errors may be transient (e.g. parse hiccups) so they are retried, but they never trigger proxy `report_failure`.
 - `ProviderDataError` marks data bad; only `Timeout`/`Connection` errors blame (remove + blacklist) the proxy.
 - Past-departure failures are skipped entirely — once `dep_date < today` no amount of retries can succeed. Build-time already skips past dates; retry skips them too.
-- Failed routes rejected from retry once retry count >= 3, except 429 which is always re-queued to the next round.
+- `retries` stores **cumulative attempts consumed** (1-based). A success at attempt *n* records `retries = n`; a failure after all 3 in-flight attempts records `retries = round * 3`. Round *r* re-queries failures with `retries <= r * 3`, so each round grants a fresh 3-attempt budget (`get_failed(max_retries=r * 3)`).
+- Failed routes not covered by any provider are skipped with a WARNING (route is either removed from the catalog or the provider's `supports` map changed).
 
 ## Midnight rollover contract
 
@@ -30,7 +31,7 @@
 - **Factories:** `tests/libs/factories.py` — `make_proxy`, `make_flights` for data setup.
 - **Lifecycle:** `conftest.py` owns the opened repo fixture with teardown; tests never open/close manually.
 - **Determinism:** `pytest-randomly` shuffles order each run; `filterwarnings=error` fails on leaked resources; `--strict-markers` catches typo'd markers.
-- **Gate:** `fail_under = 80` coverage; current 91%.
+- **Gate:** `fail_under = 80` coverage; current 97% (288 tests).
 
 ## Cost control
 
