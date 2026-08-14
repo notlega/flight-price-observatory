@@ -52,7 +52,8 @@ _AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
 _FETCH_TIMEOUT = 10
-_REFILL_MAX_PER_SOURCE = 150
+_REFILL_MAX_PER_SOURCE = 500
+_ALIVE_TO_VALID_MULTIPLIER = 40
 
 
 def _build_sources() -> list[tuple[str, str]]:
@@ -112,7 +113,33 @@ def _build_sources() -> list[tuple[str, str]]:
             "https://databay.com/api/v1/proxy-list?google=true&ssl=strict&format=txt&protocol=http",
         )
     )
-    return sources
+    return _prioritise_sources(sources)
+
+
+_PRIORITY_MARKERS = (
+    "checked-proxy-list",
+    "databay",
+    "proxyscrape",
+    "proxyspace",
+    "moststable",
+    "vmheaven",
+    "clearproxy",
+)
+
+
+def _prioritise_sources(sources: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Order high-yield sources first so streaming prefilter meets its
+    alive target from fewer, richer batches."""
+
+    def key(source: tuple[str, str]) -> tuple[int, int]:
+        _, url = source
+        lower = url.lower()
+        for rank, marker in enumerate(_PRIORITY_MARKERS):
+            if marker in lower:
+                return (0, rank)
+        return (1, 0)
+
+    return sorted(sources, key=key)
 
 
 _PROXY_SOURCES: list[tuple[str, str]] = _build_sources()
@@ -350,6 +377,19 @@ async def _prefilter_tcp(proxies: list[ProxyInfo]) -> list[ProxyInfo]:
     return [p for p, ok in zip(proxies, results) if ok]
 
 
+async def _prefilter_tcp_until(
+    proxies: list[ProxyInfo], alive_target: int
+) -> list[ProxyInfo]:
+    """Probe candidates in batches until ``alive_target`` survive, or run out."""
+    alive: list[ProxyInfo] = []
+    for start in range(0, len(proxies), _TCP_FILTER_LIMIT):
+        batch = proxies[start : start + _TCP_FILTER_LIMIT]
+        alive.extend(await _prefilter_tcp(batch))
+        if len(alive) >= alive_target:
+            break
+    return alive
+
+
 async def _validate_proxy(proxy: ProxyInfo, session: AsyncSession) -> ProxyInfo | None:
     latency = await _test_http_echo(proxy.url, session)
 
@@ -398,7 +438,7 @@ class ProxyRotator:
     def __init__(
         self,
         max_concurrent: int = 200,
-        max_per_source: int = 500,
+        max_per_source: int = 1500,
     ):
         self._proxies: list[ProxyInfo] = []
         self._index = 0
@@ -423,7 +463,10 @@ class ProxyRotator:
             return []
 
         logger.debug("TCP prefiltering %d proxies", len(proxies))
-        alive = await _prefilter_tcp(proxies)
+        alive_target = (target if target is not None else _VALIDATE_TARGET) * (
+            _ALIVE_TO_VALID_MULTIPLIER
+        )
+        alive = await _prefilter_tcp_until(proxies, alive_target)
         logger.debug("TCP-alive: %d/%d", len(alive), len(proxies))
         if not alive:
             return []
