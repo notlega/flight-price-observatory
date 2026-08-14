@@ -1,8 +1,8 @@
 """Search subcommand: run bulk flight price collection."""
 
+import argparse
 import asyncio
 from datetime import date, timedelta
-from typing import Any
 
 from collector import CollectorManager, ProviderRegistry
 from collector.config import (
@@ -13,7 +13,9 @@ from collector.config import (
 )
 
 
-def configure_parser(subparsers: Any):
+def configure_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
     p = subparsers.add_parser("search", help="Bulk flight search")
     p.add_argument(
         "--start",
@@ -57,11 +59,11 @@ def _ahead_days(end: date) -> int:
     return max((end - date.today()).days, 0)
 
 
-def run(args):
+def run(args: argparse.Namespace) -> None:
     asyncio.run(_async_run(args))
 
 
-async def _async_run(args):
+async def _async_run(args: argparse.Namespace) -> None:
     start = args.start
     end = start + timedelta(days=args.max_days)
 

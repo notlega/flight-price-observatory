@@ -15,7 +15,7 @@ _RATE_RECOVERY = 2.0
 
 
 class RateLimiter:
-    def __init__(self, max_rate: float = 8, min_rate: float = 0.5):
+    def __init__(self, max_rate: float = 8, min_rate: float = 0.5) -> None:
         if max_rate <= 0:
             raise ValueError("max_rate must be > 0")
         if min_rate <= 0:
@@ -31,7 +31,7 @@ class RateLimiter:
         self._lock = asyncio.Lock()
         self._429_times: deque[float] = deque()
 
-    async def acquire(self):
+    async def acquire(self) -> None:
         async with self._lock:
             now = time.monotonic()
             elapsed = now - self.refill_at
@@ -49,7 +49,7 @@ class RateLimiter:
             delay = when - now
         await asyncio.sleep(delay)
 
-    async def report_429(self):
+    async def report_429(self) -> None:
         async with self._lock:
             now = time.monotonic()
             self._429_times.append(now)
@@ -69,7 +69,7 @@ class RateLimiter:
                         _RATE_429_WINDOW,
                     )
 
-    async def report_success(self):
+    async def report_success(self) -> None:
         async with self._lock:
             now = time.monotonic()
             cutoff = now - _RATE_RECOVERY_WINDOW

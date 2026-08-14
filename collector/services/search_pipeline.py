@@ -264,7 +264,7 @@ class BulkSearchPipeline:
 
             progress.maybe_log(done, total, render, force=final)
 
-        async def worker():
+        async def worker() -> None:
             nonlocal done
             async with AsyncSession() as session:
                 while True:
@@ -358,7 +358,7 @@ class BulkSearchPipeline:
                 m[_route_key(origin, dest)] = (p, origin, dest)
         return m
 
-    async def _retry_loop(self, rounds: int = 3):
+    async def _retry_loop(self, rounds: int = 3) -> None:
         provider_map = await self._get_provider_map()
         for rnd in range(1, rounds + 1):
             failed = await self.repo.get_failed(max_retries=rnd * _MAX_ATTEMPTS)
@@ -399,11 +399,11 @@ class BulkSearchPipeline:
                     retry_round=rnd,
                 )
 
-    async def _log_counts(self, label: str):
+    async def _log_counts(self, label: str) -> None:
         success, failed = await self.repo.count_status()
         logger.info("%s: %d success, %d failed", label, success, failed)
 
-    async def _log_failure_breakdown(self):
+    async def _log_failure_breakdown(self) -> None:
         by_error = await self.repo.count_by_error()
         if by_error:
             logger.warning("Failed breakdown: %s", dict(by_error))

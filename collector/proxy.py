@@ -440,7 +440,7 @@ class ProxyRotator:
             logger, step_pct=_VALIDATE_LOG_STEP_PCT, level=logging.DEBUG
         )
 
-        async def worker():
+        async def worker() -> None:
             nonlocal checked
             async with AsyncSession() as session:
                 while True:
@@ -472,7 +472,7 @@ class ProxyRotator:
         valid.sort(key=lambda p: p.quality_score, reverse=True)
         return valid
 
-    async def _set_pool(self, proxies: list[ProxyInfo]):
+    async def _set_pool(self, proxies: list[ProxyInfo]) -> None:
         async with self._lock:
             self._proxies = proxies
             self._index = 0
@@ -480,7 +480,7 @@ class ProxyRotator:
             self._weight_pool_len = len(proxies)
             self._recompute_weights()
 
-    async def _apply_valid(self, valid: list[ProxyInfo], total: int):
+    async def _apply_valid(self, valid: list[ProxyInfo], total: int) -> None:
         await self._set_pool(valid)
         _save_cache(valid)
         logger.info(
@@ -490,7 +490,7 @@ class ProxyRotator:
             len(valid) / max(total, 1) * 100,
         )
 
-    def _recompute_weights(self, pool: list[ProxyInfo] | None = None):
+    def _recompute_weights(self, pool: list[ProxyInfo] | None = None) -> None:
         pool = pool if pool is not None else self._proxies
         self._cum_weights = []
         total = 0.0
@@ -499,7 +499,9 @@ class ProxyRotator:
             self._cum_weights.append(total)
         self._total_weight = total
 
-    async def refresh(self, force: bool = False, max_per_source: int | None = None):
+    async def refresh(
+        self, force: bool = False, max_per_source: int | None = None
+    ) -> None:
         """Repopulate the proxy pool from cache or all sources.
 
         Args:
@@ -593,13 +595,13 @@ class ProxyRotator:
                 proxy = self._pick()
         return proxy
 
-    async def _ensure_refresh_task(self):
+    async def _ensure_refresh_task(self) -> None:
         async with self._schedule_lock:
             if self._refresh_task is not None and not self._refresh_task.done():
                 return
             self._refresh_task = asyncio.create_task(self._auto_refresh())
 
-    async def _auto_refresh(self):
+    async def _auto_refresh(self) -> None:
         try:
             now = time.monotonic()
             if now - self._last_auto_refresh < _AUTO_REFRESH_GAP:
@@ -630,7 +632,7 @@ class ProxyRotator:
         finally:
             self._refresh_task = None
 
-    async def report_failure(self, proxy: ProxyInfo):
+    async def report_failure(self, proxy: ProxyInfo) -> None:
         async with self._lock:
             try:
                 self._proxies.remove(proxy)

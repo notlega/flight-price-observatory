@@ -97,7 +97,7 @@ def _search_context(filters: FlightSearchFilters) -> str:
 class GoogleFlightsProvider(BaseProvider):
     name = "google_flights"
 
-    def __init__(self, rt_expand_top_n: int = 3):
+    def __init__(self, rt_expand_top_n: int = 3) -> None:
         self._rt_expand_top_n = rt_expand_top_n
 
     @property

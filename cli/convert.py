@@ -1,13 +1,15 @@
 """Convert subcommand: export search DB to JSONL."""
 
+import argparse
 import asyncio
-from typing import Any
 
 from collector.config import DEFAULT_DB_PATH
 from collector.convert import convert
 
 
-def configure_parser(subparsers: Any):
+def configure_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
     p = subparsers.add_parser("convert", help="Convert SQLite state to JSONL")
     p.add_argument(
         "--db",
@@ -29,6 +31,6 @@ def configure_parser(subparsers: Any):
     p.set_defaults(func=run)
 
 
-def run(args):
+def run(args: argparse.Namespace) -> None:
     output = asyncio.run(convert(args.db, args.output, delete=not args.keep_db))
     print(f"Output: {output}")

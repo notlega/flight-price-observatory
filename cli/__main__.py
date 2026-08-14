@@ -12,7 +12,7 @@ def _configure_logging(verbose: bool) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Flight Price Observatory CLI",
     )

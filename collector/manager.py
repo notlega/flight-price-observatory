@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class CollectorManager:
-    def __init__(self, registry: ProviderRegistry):
+    def __init__(self, registry: ProviderRegistry) -> None:
         self._registry = registry
 
     async def run(
@@ -31,7 +31,7 @@ class CollectorManager:
         workers: int = DEFAULT_WORKERS,
         db_path: str = DEFAULT_DB_PATH,
         keep_db: bool = False,
-    ):
+    ) -> None:
         """Collect flight prices for all providers over the date range.
 
         Args:

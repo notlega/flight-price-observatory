@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProviderRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         self.__providers: dict[str, type[BaseProvider]] = {
             "google_flights": GoogleFlightsProvider,
         }
@@ -18,8 +18,8 @@ class ProviderRegistry:
     def providers(self) -> dict[str, type[BaseProvider]]:
         return dict(self.__providers)
 
-    def register(self, name: str, provider: type[BaseProvider]):
+    def register(self, name: str, provider: type[BaseProvider]) -> None:
         self.__providers[name] = provider
 
-    def unregister(self, name: str):
+    def unregister(self, name: str) -> None:
         self.__providers.pop(name, None)

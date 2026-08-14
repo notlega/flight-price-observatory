@@ -53,7 +53,7 @@ _FLUSH = object()
 
 
 class SearchRepository:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._conn: aiosqlite.Connection | None = None
         self._write_queue: asyncio.Queue | None = None
@@ -70,7 +70,7 @@ class SearchRepository:
         assert self._write_queue is not None, "writer queue not started"
         return self._write_queue
 
-    async def open(self):
+    async def open(self) -> None:
         """Open the database connection and start the writer loop."""
         db_dir = Path(self._db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
@@ -94,13 +94,13 @@ class SearchRepository:
         self._write_queue = asyncio.Queue()
         self._writer_task = asyncio.create_task(self._writer_loop())
 
-    async def _migrate(self):
+    async def _migrate(self) -> None:
         cursor = await self._c.execute("PRAGMA table_info(search_results)")
         columns = {row[1] for row in await cursor.fetchall()}
         if columns and "return_date" not in columns:
             await self._c.execute("DROP TABLE search_results")
 
-    async def _writer_loop(self):
+    async def _writer_loop(self) -> None:
         batch: list[tuple] = []
         while True:
             item = await self._q.get()
@@ -125,7 +125,7 @@ class SearchRepository:
         await self._c.executemany(_INSERT_SQL, batch)
         await self._c.commit()
 
-    async def flush(self):
+    async def flush(self) -> None:
         """Commit all queued writes (await the writer draining the queue)."""
         if self._conn is None or self._write_queue is None:
             return
@@ -133,7 +133,7 @@ class SearchRepository:
             self._write_queue.put_nowait(_FLUSH)
             await self._q.join()
 
-    async def close(self):
+    async def close(self) -> None:
         if self._conn is None:
             return
         if self._write_queue is not None:
@@ -158,7 +158,7 @@ class SearchRepository:
         retries: int,
         success: bool,
         searched_at: str,
-    ):
+    ) -> None:
         """Queue a search result write, keyed by route and dates."""
         flights_json = json.dumps(flights) if flights else None
         self._q.put_nowait(
@@ -177,7 +177,9 @@ class SearchRepository:
             )
         )
 
-    async def insert_ignore_all(self, tasks: list[tuple[str, str, str, str, str, str]]):
+    async def insert_ignore_all(
+        self, tasks: list[tuple[str, str, str, str, str, str]]
+    ) -> None:
         sql = (
             "INSERT OR IGNORE INTO search_results "
             "(route, dep_date, return_date, flight_type, origin, destination, retries, success) "
@@ -258,7 +260,7 @@ class SearchRepository:
         async for row in self._iter_successful(raw=True):
             yield row
 
-    async def delete_db(self):
+    async def delete_db(self) -> None:
         await self.close()
         for path in (
             Path(self._db_path),

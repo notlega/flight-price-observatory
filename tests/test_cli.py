@@ -1,7 +1,7 @@
 import logging
 import sys
 from datetime import date, timedelta
-from types import SimpleNamespace
+import argparse
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -68,7 +68,7 @@ def test_search_run_wraps_async(monkeypatch):
     fake = AsyncMock()
     monkeypatch.setattr("cli.search._async_run", fake)
     search_run(
-        SimpleNamespace(
+        argparse.Namespace(
             start=None,
             max_days=None,
             currency=None,
@@ -85,7 +85,7 @@ async def test_search_async_run_forwards_args():
     manager = MagicMock()
     manager.run = AsyncMock()
     start = date(2026, 8, 1)
-    args = SimpleNamespace(
+    args = argparse.Namespace(
         start=start,
         max_days=3,
         currency="USD",
@@ -114,7 +114,7 @@ async def test_search_async_run_forwards_args():
 def test_convert_run_passes_delete_from_keep_db(monkeypatch, capsys):
     convert_fn = AsyncMock(return_value="/tmp/out.jsonl")
     monkeypatch.setattr("cli.convert.convert", convert_fn)
-    convert_run(SimpleNamespace(db="s.db", output="o.jsonl", keep_db=True))
+    convert_run(argparse.Namespace(db="s.db", output="o.jsonl", keep_db=True))
     convert_fn.assert_awaited_once_with("s.db", "o.jsonl", delete=False)
     assert "Output: /tmp/out.jsonl" in capsys.readouterr().out
 
@@ -122,7 +122,7 @@ def test_convert_run_passes_delete_from_keep_db(monkeypatch, capsys):
 def test_convert_run_delete_when_no_keep_db(monkeypatch):
     convert_fn = AsyncMock(return_value="/tmp/out.jsonl")
     monkeypatch.setattr("cli.convert.convert", convert_fn)
-    convert_run(SimpleNamespace(db="s.db", output="o.jsonl", keep_db=False))
+    convert_run(argparse.Namespace(db="s.db", output="o.jsonl", keep_db=False))
     convert_fn.assert_awaited_once_with("s.db", "o.jsonl", delete=True)
 
 
