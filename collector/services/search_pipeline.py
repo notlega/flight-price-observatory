@@ -290,7 +290,10 @@ class BulkSearchPipeline:
 
         n_workers = min(max(self.max_concurrent, 1), max(total, 1))
         workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
-        await asyncio.gather(*workers)
+        results = await asyncio.gather(*workers, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.error("Search batch worker crashed: %s", result)
         log_progress(final=True)
 
     async def _record_failure(

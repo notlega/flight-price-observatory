@@ -316,6 +316,41 @@ async def test_run_batch_records_unexpected_failure():
     assert pipeline.repo.upserts[-1]["success"] is False
 
 
+async def test_run_batch_worker_crash_does_not_abandon_other_tasks():
+    provider = FakeProvider(script=[RuntimeError("boom")] * 3 + [make_flights(100)])
+    pipeline = _make_pipeline(provider=provider, max_concurrent=2)
+
+    async def flaky_record_failure(task, retry_round):
+        raise RuntimeError("recorder down")
+
+    pipeline._record_failure = flaky_record_failure  # type: ignore[method-assign]
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._run_batch(
+            [
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                ),
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                ),
+            ],
+            "test",
+        )
+    assert any(r["success"] is True for r in pipeline.repo.upserts)
+
+
 async def test_run_batch_zero_max_concurrent_processes_all():
     provider = FakeProvider(script=[make_flights(100)] * 3)
     pipeline = _make_pipeline(provider=provider, max_concurrent=0)
