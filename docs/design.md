@@ -23,6 +23,8 @@
 - 3 retry rounds.
 - Retryable: `ProviderRateLimitedError` (fresh proxies), `ProviderTimeoutError`, `ProviderConnectionError`, `ProviderDataError`, `no_proxy` (see `_RETRY_ERROR_TYPES`). Data errors may be transient (e.g. parse hiccups) so they are retried, but they never trigger proxy `report_failure`.
 - `ProviderDataError` marks data bad; only `Timeout`/`Connection` errors blame (remove + blacklist) the proxy.
+- **Stub backoff:** a `ProviderBlockedError` (Google stub shell, status 200) sleeps `_STUB_BACKOFF_S` before the next in-flight attempt, letting a throttled proxy IP cool instead of hammering the pool during degraded windows.
+- **Query stub cooldown:** consecutive stubs per `(origin, dest, departure, return_date)` accumulate across rounds. At `_STUB_QUERY_THRESHOLD` the query is skipped for the rest of the run (logged `stub-cooldowned`) — a query that stubs on every attempt is IP/query-throttled, not a transient failure, so the 12-attempt burn is capped near the threshold. Counter resets on any success or new run, so legitimately recovering queries are not harmed.
 - Past-departure failures are skipped entirely — once `dep_date < today` no amount of retries can succeed. Build-time already skips past dates; retry skips them too.
 - `retries` stores **cumulative attempts consumed** (1-based). A success at attempt *n* records `retries = n`; a failure after all 3 in-flight attempts records `retries = round * 3`. Round *r* re-queries failures with `retries <= r * 3`, so each round grants a fresh 3-attempt budget (`get_failed(max_retries=r * 3)`).
 - Failed routes not covered by any provider are skipped with a WARNING (route is either removed from the catalog or the provider's `supports` map changed).
