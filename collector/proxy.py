@@ -43,6 +43,8 @@ _VALIDATE_LOG_STEP_PCT = 10
 
 _RATE_LIMIT_COOLDOWN = 120
 _MAX_429_EVICTIONS = 3
+_MAX_STUB_EVICTIONS = 3
+_MIN_CACHE_POOL = 50
 _REFILL_THRESHOLD = 20
 
 _EMPTY_REFETCH_BACKOFF = (60, 120, 300, 600)
@@ -539,6 +541,15 @@ class ProxyRotator:
         if age < _CACHE_FRESH_TTL:
             excluded = self._active_blacklist()
             filtered = [p for p in cached_proxies if p.url not in excluded]
+            if len(filtered) < _MIN_CACHE_POOL:
+                logger.info(
+                    "Proxy cache fresh (%.0fs old): %d proxies below min pool "
+                    "%d; fetching fresh",
+                    age,
+                    len(filtered),
+                    _MIN_CACHE_POOL,
+                )
+                return False
             if len(filtered) > self.usable_count():
                 await self._set_pool(filtered)
             logger.info(
@@ -556,9 +567,17 @@ class ProxyRotator:
             )
             valid = await self._validate(cached_proxies)
             if valid:
-                await self._apply_valid(valid, len(cached_proxies))
-                return True
-            logger.warning("All cached proxies dead; fetching fresh")
+                if len(valid) >= _MIN_CACHE_POOL:
+                    await self._apply_valid(valid, len(cached_proxies))
+                    return True
+                logger.warning(
+                    "Cached proxies revalidated to %d below min pool %d; "
+                    "fetching fresh",
+                    len(valid),
+                    _MIN_CACHE_POOL,
+                )
+            else:
+                logger.warning("All cached proxies dead; fetching fresh")
         return False
 
     def _pick(self) -> ProxyInfo | None:
@@ -644,6 +663,22 @@ class ProxyRotator:
             except ValueError:
                 pass
             self._blacklist[proxy.url] = time.monotonic() + _DEAD_BLACKLIST_TTL
+
+    async def report_stub(self, proxy: ProxyInfo) -> None:
+        async with self._lock:
+            proxy.stub_count += 1
+            if proxy.stub_count >= _MAX_STUB_EVICTIONS:
+                try:
+                    self._proxies.remove(proxy)
+                    logger.info(
+                        "Evicted proxy %s after %d stubs (%d remaining)",
+                        proxy.url,
+                        proxy.stub_count,
+                        len(self._proxies),
+                    )
+                except ValueError:
+                    pass
+                self._blacklist[proxy.url] = time.monotonic() + _EVICT_BLACKLIST_TTL
 
     async def report_rate_limited(
         self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN

@@ -248,6 +248,35 @@ async def test_insert_ignore_all_does_not_overwrite(repo):
     assert len(rows) == 1
 
 
+async def test_purge_abandoned_seeds_removes_null_error_rows(repo):
+    await repo.insert_ignore_all(
+        [("SIN|KUL", "2026-08-01", "", "ONE_WAY", "SIN", "KUL")]
+    )
+    await _upsert(repo, "BKK|KUL", error_type="timeout", retries=2, success=False)
+    await _upsert(
+        repo, "SIN|BKK", flights=[{"price": 100}], origin="SIN", destination="BKK"
+    )
+    await repo.flush()
+
+    purged = await repo.purge_abandoned_seeds()
+
+    assert purged == 1
+    failed = [r[0] for r in await repo.get_failed(max_retries=3)]
+    assert failed == ["BKK|KUL"]
+    successful = [r async for r in repo.iter_successful()]
+    assert [r["route"] for r in successful] == ["SIN|BKK"]
+
+
+async def test_purge_abandoned_seeds_noop_when_clean(repo):
+    await repo.insert_ignore_all(
+        [("SIN|KUL", "2026-08-01", "", "ONE_WAY", "SIN", "KUL")]
+    )
+    await _upsert(repo, "SIN|KUL", error_type="timeout", retries=2, success=False)
+    await repo.flush()
+
+    assert await repo.purge_abandoned_seeds() == 0
+
+
 async def test_wal_journal_mode(repo):
     cursor = await repo._conn.execute("PRAGMA journal_mode")
     row = await cursor.fetchone()

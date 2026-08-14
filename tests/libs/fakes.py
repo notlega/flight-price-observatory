@@ -58,6 +58,7 @@ class FakeRotator:
         self._working = working
         self.failures: list[ProxyInfo | None] = []
         self.rate_limited: list[tuple[ProxyInfo | None, float]] = []
+        self.stubs: list[ProxyInfo | None] = []
         self.refreshes: list[tuple[bool, int | None]] = []
 
     async def get_proxy(self) -> ProxyInfo | None:
@@ -68,6 +69,9 @@ class FakeRotator:
 
     async def report_rate_limited(self, proxy: ProxyInfo, seconds: float = 60):
         self.rate_limited.append((proxy, seconds))
+
+    async def report_stub(self, proxy: ProxyInfo | None):
+        self.stubs.append(proxy)
 
     def working_count(self) -> int:
         return self._working
@@ -126,6 +130,9 @@ class FakeRepo:
 
     async def insert_ignore_all(self, tasks: list[SeedRow]) -> None:
         self.inserted.extend(tasks)
+
+    async def purge_abandoned_seeds(self) -> int:
+        return 0
 
     async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
         return list(self.failed)

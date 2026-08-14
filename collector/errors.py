@@ -21,6 +21,10 @@ class ProviderDataError(ProviderError):
     pass
 
 
+class ProviderBlockedError(ProviderDataError):
+    pass
+
+
 class ErrorType:
     NO_PROXY = "no_proxy"
     RATE_LIMITED = "429"

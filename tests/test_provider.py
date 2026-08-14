@@ -10,6 +10,7 @@ from fli.search import _decoders as _fli_decoders
 
 from collector._fli_airports import _extend_airport_enum, _patch_fli_airports
 from collector.errors import (
+    ProviderBlockedError,
     ProviderConnectionError,
     ProviderDataError,
     ProviderRateLimitedError,
@@ -235,17 +236,36 @@ async def test_search_owned_session_is_closed():
             return_value=None,
         ),
     ):
-        result = await _provider().search(
-            SIN, KUL, "2026-12-01", proxy_url=PROXY, session=None
-        )
+        with pytest.raises(ProviderBlockedError):
+            await _provider().search(
+                SIN, KUL, "2026-12-01", proxy_url=PROXY, session=None
+            )
 
-    assert result is None
     assert len(factory.created) == 1
     assert factory.created[0].closed
 
 
+async def test_search_raises_blocked_on_stub_payload():
+    session = FakeSession(response=FakeResponse(status_code=200, text="stub"))
+    with patch(
+        "collector.providers.google_flights.provider.parse_first_wrb_payload",
+        return_value=None,
+    ):
+        with pytest.raises(ProviderBlockedError):
+            await _search(session)
+
+
+async def test_search_returns_none_when_large_body_has_no_payload():
+    session = FakeSession(response=FakeResponse(status_code=200, text="x" * 2000))
+    with patch(
+        "collector.providers.google_flights.provider.parse_first_wrb_payload",
+        return_value=None,
+    ):
+        assert await _search(session) is None
+
+
 async def test_search_returns_none_when_payload_empty():
-    session = FakeSession(response=FakeResponse(status_code=200, text=""))
+    session = FakeSession(response=FakeResponse(status_code=200, text="x" * 2000))
     with patch(
         "collector.providers.google_flights.provider.parse_first_wrb_payload",
         return_value=None,
@@ -526,7 +546,7 @@ async def test_search_round_trip_raises_when_empty_inbound_and_error_mixed():
             side_effect=lambda row: make_flight(row),
         ),
     ):
-        with pytest.raises(ProviderRateLimitedError):
+        with pytest.raises(ProviderBlockedError):
             await _provider(rt_expand_top_n=2).search(
                 SIN,
                 KUL,
@@ -563,17 +583,17 @@ async def test_search_round_trip_returns_none_when_all_expands_empty():
             side_effect=lambda row: make_flight(row),
         ),
     ):
-        result = await _provider(rt_expand_top_n=2).search(
-            SIN,
-            KUL,
-            "2026-12-01",
-            currency="SGD",
-            proxy_url=PROXY,
-            session=cast(Any, session),
-            return_date="2026-12-08",
-        )
+        with pytest.raises(ProviderBlockedError):
+            await _provider(rt_expand_top_n=2).search(
+                SIN,
+                KUL,
+                "2026-12-01",
+                currency="SGD",
+                proxy_url=PROXY,
+                session=cast(Any, session),
+                return_date="2026-12-08",
+            )
 
-    assert result is None
     assert session.post.await_count == 3
 
 
@@ -770,15 +790,15 @@ async def test_search_round_trip_single_expand_empty_returns_none():
             side_effect=lambda row: make_flight(row),
         ),
     ):
-        result = await _provider(rt_expand_top_n=1).search(
-            SIN,
-            KUL,
-            "2026-12-01",
-            currency="SGD",
-            proxy_url=PROXY,
-            session=cast(Any, session),
-            return_date="2026-12-08",
-        )
+        with pytest.raises(ProviderBlockedError):
+            await _provider(rt_expand_top_n=1).search(
+                SIN,
+                KUL,
+                "2026-12-01",
+                currency="SGD",
+                proxy_url=PROXY,
+                session=cast(Any, session),
+                return_date="2026-12-08",
+            )
 
-    assert result is None
     assert session.post.await_count == 2

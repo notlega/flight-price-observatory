@@ -24,6 +24,7 @@ from fli.search._wire import parse_first_wrb_payload
 
 from collector import _fli_airports  # noqa: F401
 from collector.errors import (
+    ProviderBlockedError,
     ProviderConnectionError,
     ProviderDataError,
     ProviderRateLimitedError,
@@ -42,6 +43,8 @@ _SHOPPING_URL = (
 _HEADERS = {
     "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
 }
+
+_STUB_MAX_LEN = 1024
 
 _REQUEST_TIMEOUT = 30
 
@@ -175,6 +178,10 @@ class GoogleFlightsProvider(BaseProvider):
                 len(response.text),
                 "wrb" in response.text,
             )
+            if len(response.text) < _STUB_MAX_LEN:
+                raise ProviderBlockedError(
+                    f"Blocked stub response for {_search_context(filters)}"
+                )
             return None
 
         try:

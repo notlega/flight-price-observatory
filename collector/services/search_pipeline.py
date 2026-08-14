@@ -12,6 +12,7 @@ from fli.models import Airport
 from collector.convert import convert, default_output_path
 from collector.errors import (
     ErrorType,
+    ProviderBlockedError,
     ProviderConnectionError,
     ProviderDataError,
     ProviderRateLimitedError,
@@ -139,6 +140,9 @@ class BulkSearchPipeline:
             await self.rate_limiter.report_429()
             await self.rotator.report_rate_limited(proxy_info)
             return AttemptResult(None, ErrorType.RATE_LIMITED, proxy_info)
+        except ProviderBlockedError:
+            await self.rotator.report_stub(proxy_info)
+            return AttemptResult(None, ErrorType.DATA, proxy_info)
         except ProviderTimeoutError:
             return AttemptResult(None, ErrorType.TIMEOUT, proxy_info)
         except ProviderConnectionError:
@@ -500,6 +504,9 @@ class BulkSearchPipeline:
         proxy_task = asyncio.create_task(self.rotator.refresh())
         try:
             await self.repo.open()
+            purged = await self.repo.purge_abandoned_seeds()
+            if purged:
+                logger.info("Purged %d abandoned seed rows", purged)
             await self.repo.insert_ignore_all(seed_rows)
             await proxy_task
 

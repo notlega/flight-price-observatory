@@ -8,6 +8,7 @@ from fli.models import Airport
 
 from collector.errors import (
     ErrorType,
+    ProviderBlockedError,
     ProviderConnectionError,
     ProviderDataError,
     ProviderRateLimitedError,
@@ -147,6 +148,19 @@ async def test_attempt_once_429_parks_proxy():
     )
     assert result.error_type == ErrorType.RATE_LIMITED
     assert pipeline.rotator.rate_limited == [(proxy, 60)]
+
+
+async def test_attempt_once_blocked_reports_stub_as_data():
+    proxy = make_proxy()
+    pipeline = _make_pipeline(
+        provider=FakeProvider(script=[ProviderBlockedError("blocked")]),
+        rotator=FakeRotator(proxies=[proxy]),
+    )
+    result = await pipeline._attempt_once(
+        pipeline.providers[0], SIN, KUL, DEP, None, AsyncMock()
+    )
+    assert result.error_type == ErrorType.DATA
+    assert pipeline.rotator.stubs == [proxy]
 
 
 async def test_search_and_store_success_stores_once():

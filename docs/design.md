@@ -46,4 +46,6 @@
 
 - Single free tier infra: GitHub Actions cron, Cloudflare R2 (10 GB free).
 - Rate limiter guards Google Flights endpoint from 429-spiral; adaptive halving/doubling protects the provider.
-- Proxy cache (fresh 30 min) avoids re-fetching 64 sources every run.
+- Proxy cache (fresh 30 min) avoids re-fetching 64 sources every run. Cache below `_MIN_CACHE_POOL` (50 working proxies) is ignored and a fresh fetch runs — a tiny cached pool cannot starve the whole search.
+- **Stub eviction:** a 200 response whose body is a small block shell (`len < _STUB_MAX_LEN`, no `wrb.fr` payload) raises `ProviderBlockedError`; the pipeline blames the proxy (`report_stub`), evicting it after 3 stubs instead of silently recording DATA and letting the whole pool burn.
+- **Seed hygiene:** at run start `purge_abandoned_seeds()` deletes `success = 0` / NULL-error placeholder rows left by interrupted runs, so failure breakdowns reflect real errors, not zombie seeds.

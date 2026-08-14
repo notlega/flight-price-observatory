@@ -22,6 +22,7 @@ def test_proxy_to_dict_keys():
         "last_validated": 9.0,
         "rate_limit_until": 0.0,
         "rate_limited_count": 0,
+        "stub_count": 0,
     }
 
 

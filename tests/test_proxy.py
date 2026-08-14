@@ -972,6 +972,7 @@ async def test_cache_fresh_keeps_larger_live_pool():
     await rot._set_pool([make_proxy(url=f"http://live{i}:1") for i in range(5)])
     cached = [make_proxy(url="http://cached:1")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
         patch("collector.proxy._parse_all_sources") as fetch,
     ):
@@ -989,6 +990,7 @@ async def test_cache_fresh_replaces_all_parked_pool():
     await rot._set_pool([parked])
     cached = [make_proxy(url="http://cached:1")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
         patch("collector.proxy._parse_all_sources") as fetch,
     ):
@@ -1110,6 +1112,7 @@ async def test_refresh_uses_fresh_cache():
     rot = ProxyRotator()
     cached = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch("collector.proxy._load_cache", return_value=(time.time() - 60, cached)),
         patch("collector.proxy._parse_all_sources") as fetch,
     ):
@@ -1123,6 +1126,7 @@ async def test_evicted_proxy_excluded_from_cache_fresh():
     rot._blacklist["http://bad:1"] = time.monotonic() + 600
     cached = [make_proxy(url="http://bad:1"), make_proxy(url="http://good:2")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
         patch("collector.proxy._parse_all_sources") as fetch,
     ):
@@ -1155,6 +1159,7 @@ async def test_dead_proxy_excluded_from_cache_fresh():
     assert rot.working_count() == 0
     cached = [make_proxy(url="http://dead:1"), make_proxy(url="http://good:2")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
         patch("collector.proxy._parse_all_sources") as fetch,
     ):
@@ -1168,6 +1173,7 @@ async def test_blacklist_expiry_readmits_proxy():
     rot._blacklist["http://bad:1"] = time.monotonic() - 1
     cached = [make_proxy(url="http://bad:1")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
         patch("collector.proxy._parse_all_sources") as fetch,
     ):
@@ -1181,6 +1187,7 @@ async def test_refresh_stale_cache_revalidates_successfully():
     rot = ProxyRotator()
     cached = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch(
             "collector.proxy._load_cache",
             return_value=(time.time() - (_CACHE_FRESH_TTL + 60), cached),
@@ -1215,6 +1222,7 @@ async def test_refresh_cache_stale_at_exact_ttl_boundary():
     rot = ProxyRotator()
     cached = [make_proxy(url="http://a:1")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch(
             "collector.proxy._load_cache",
             return_value=(time.time() - _CACHE_FRESH_TTL, cached),
@@ -1259,6 +1267,7 @@ async def test_refresh_cache_fresh_not_replaced_when_smaller():
     )
     cached = [make_proxy(url="http://small:1")]
     with (
+        patch("collector.proxy._MIN_CACHE_POOL", 0),
         patch(
             "collector.proxy._load_cache",
             return_value=(time.time() - 10, cached),
@@ -1268,6 +1277,96 @@ async def test_refresh_cache_fresh_not_replaced_when_smaller():
         await rot.refresh(force=False)
     assert [p.url for p in rot._proxies] == ["http://big:1", "http://big:2"]
     fetch.assert_not_called()
+
+
+async def test_cache_fresh_below_min_pool_fetches_fresh():
+    rot = ProxyRotator()
+    cached = [make_proxy(url=f"http://c{i}:1") for i in range(10)]
+    fresh = [make_proxy(url=f"http://n{i}:1") for i in range(60)]
+    with (
+        patch("collector.proxy._load_cache", return_value=(time.time() - 10, cached)),
+        patch("collector.proxy._parse_all_sources", return_value=fresh),
+        patch(
+            "collector.proxy.ProxyRotator._validate",
+            side_effect=lambda ps, target=None: ps,
+        ),
+        patch("collector.proxy._save_cache"),
+    ):
+        await rot.refresh(force=False)
+    assert rot.working_count() == 60
+    assert all(p.url.startswith("http://n") for p in rot._proxies)
+
+
+async def test_cache_stale_below_min_pool_fetches_fresh():
+    rot = ProxyRotator()
+    cached = [make_proxy(url=f"http://c{i}:1") for i in range(10)]
+    fresh = [make_proxy(url=f"http://n{i}:1") for i in range(60)]
+    with (
+        patch(
+            "collector.proxy._load_cache",
+            return_value=(time.time() - (_CACHE_FRESH_TTL + 60), cached),
+        ),
+        patch("collector.proxy._parse_all_sources", return_value=fresh),
+        patch(
+            "collector.proxy.ProxyRotator._validate",
+            side_effect=lambda ps, target=None: ps,
+        ),
+        patch("collector.proxy._save_cache"),
+    ):
+        await rot.refresh(force=False)
+    assert rot.working_count() == 60
+    assert all(p.url.startswith("http://n") for p in rot._proxies)
+
+
+async def test_cache_stale_above_min_pool_uses_cache():
+    rot = ProxyRotator()
+    cached = [make_proxy(url=f"http://c{i}:1") for i in range(60)]
+    with (
+        patch(
+            "collector.proxy._load_cache",
+            return_value=(time.time() - (_CACHE_FRESH_TTL + 60), cached),
+        ),
+        patch.object(
+            rot,
+            "_validate",
+            new=AsyncMock(side_effect=lambda proxies, **kw: proxies),
+        ),
+        patch("collector.proxy._parse_all_sources") as fetch,
+        patch("collector.proxy._save_cache"),
+    ):
+        await rot.refresh(force=False)
+    assert rot.working_count() == 60
+    fetch.assert_not_called()
+
+
+async def test_report_stub_below_threshold_keeps_proxy():
+    rot = ProxyRotator()
+    proxy = make_proxy(url="http://s:1")
+    await rot._set_pool([proxy])
+    await rot.report_stub(proxy)
+    assert proxy.stub_count == 1
+    assert rot.working_count() == 1
+    assert proxy.url not in rot._blacklist
+
+
+async def test_report_stub_evicts_at_threshold():
+    rot = ProxyRotator()
+    proxy = make_proxy(url="http://s:1")
+    await rot._set_pool([proxy])
+    for _ in range(3):
+        await rot.report_stub(proxy)
+    assert rot.working_count() == 0
+    assert proxy.url in rot._blacklist
+
+
+async def test_report_stub_count_roundtrips_cache(tmp_path):
+    path = tmp_path / "cache.json"
+    with patch("collector.proxy._PROXY_CACHE_PATH", str(path)):
+        p = make_proxy(url="http://a:1", stub_count=2)
+        _save_cache([p])
+        loaded = _load_cache()
+        assert loaded is not None
+        assert loaded[1][0].stub_count == 2
 
 
 def test_last_force_refresh_init_allows_immediate_refill():

@@ -199,7 +199,21 @@ class SearchRepository:
         )
         async with self._write_lock:
             await self._c.executemany(sql, tasks)
+
+    async def purge_abandoned_seeds(self) -> int:
+        """Delete seeded placeholder rows from interrupted runs.
+
+        Rows with ``success = 0`` and NULL ``error_type`` are only ever
+        created by ``insert_ignore_all``; a surviving row means its task was
+        never searched (e.g. the process was killed mid-run). Purging them
+        keeps ``count_by_error()`` from reporting abandoned seeds as failures.
+        """
+        async with self._write_lock:
+            cursor = await self._c.execute(
+                "DELETE FROM search_results WHERE success = 0 AND error_type IS NULL"
+            )
             await self._c.commit()
+        return cursor.rowcount
 
     async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
         """Return failed tasks retried at most ``max_retries`` attempts.
