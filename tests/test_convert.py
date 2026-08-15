@@ -163,3 +163,20 @@ def test_jsonl_row_passthrough_flights_string():
         "flights": [{"price": 100}],
         "searched_at": "2026-01-01T00:00:00Z",
     }
+
+
+def test_jsonl_row_splices_flights_unescaped():
+    flights_raw = '[{"price": 100.5, "name": "大阪"}]'
+    row = {
+        "route": "SIN|KUL",
+        "dep_date": "2026-08-01",
+        "return_date": "",
+        "flight_type": "ONE_WAY",
+        "origin": "SIN",
+        "destination": "KUL",
+        "flights": flights_raw,
+        "searched_at": "2026-01-01T00:00:00Z",
+    }
+    line = _jsonl_row(row)
+    assert f'"flights":{flights_raw}' in line
+    assert json.loads(line)["flights"] == [{"price": 100.5, "name": "大阪"}]

@@ -1,5 +1,7 @@
 """Provider error taxonomy and task failure classification."""
 
+from enum import StrEnum
+
 
 class ProviderError(Exception):
     pass
@@ -25,7 +27,7 @@ class ProviderBlockedError(ProviderDataError):
     pass
 
 
-class ErrorType:
+class ErrorType(StrEnum):
     NO_PROXY = "no_proxy"
     RATE_LIMITED = "429"
     TIMEOUT = "timeout"

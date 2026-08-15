@@ -10,16 +10,16 @@ logger = logging.getLogger(__name__)
 
 class ProviderRegistry:
     def __init__(self) -> None:
-        self.__providers: dict[str, type[BaseProvider]] = {
+        self._providers: dict[str, type[BaseProvider]] = {
             "google_flights": GoogleFlightsProvider,
         }
 
     @property
     def providers(self) -> dict[str, type[BaseProvider]]:
-        return dict(self.__providers)
+        return dict(self._providers)
 
     def register(self, name: str, provider: type[BaseProvider]) -> None:
-        self.__providers[name] = provider
+        self._providers[name] = provider
 
     def unregister(self, name: str) -> None:
-        self.__providers.pop(name, None)
+        self._providers.pop(name, None)

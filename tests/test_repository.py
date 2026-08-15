@@ -55,10 +55,10 @@ async def test_writer_auto_flushes_at_batch_boundary(repo, n):
 async def test_iter_successful_raises_on_corrupt_flights_json(repo):
     await _upsert(repo, "r", flights=[{"p": 1}])
     await repo.flush()
-    await repo._c.execute(
+    await repo._connection.execute(
         "UPDATE search_results SET flights = '{broken' WHERE route = 'r'"
     )
-    await repo._c.commit()
+    await repo._connection.commit()
     with pytest.raises(json.JSONDecodeError):
         rows = [row async for row in repo.iter_successful()]
         assert rows
@@ -76,7 +76,7 @@ async def test_legacy_schema_without_return_date_is_dropped(tmp_path):
 
     repo = SearchRepository(db)
     await repo.open()
-    cursor = await repo._c.execute("PRAGMA table_info(search_results)")
+    cursor = await repo._connection.execute("PRAGMA table_info(search_results)")
     cols = {row[1] for row in await cursor.fetchall()}
     assert "return_date" in cols
     await repo.close()

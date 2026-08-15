@@ -44,20 +44,7 @@ class RouteCatalog:
         return [Route(cls.HUB, dest) for dest in cls.DESTINATIONS]
 
     iri_map: ClassVar[dict[str, Airport]] = {
-        "SIN": Airport["SIN"],
-        "KUL": Airport["KUL"],
-        "CGK": Airport["CGK"],
-        "BKK": Airport["BKK"],
-        "HKT": Airport["HKT"],
-        "DPS": Airport["DPS"],
-        "MNL": Airport["MNL"],
-        "SGN": Airport["SGN"],
-        "HAN": Airport["HAN"],
-        "NRT": Airport["NRT"],
-        "KIX": Airport["KIX"],
-        "HND": Airport["HND"],
-        "PVG": Airport["PVG"],
-        "PEK": Airport["PEK"],
+        code: Airport[code] for code in (HUB, *DESTINATIONS)
     }
 
     @classmethod

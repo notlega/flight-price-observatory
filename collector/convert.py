@@ -20,25 +20,24 @@ def default_output_path() -> str:
 
 
 def _jsonl_row(row: dict[str, Any]) -> str:
-    return (
-        '{"route":'
-        + json.dumps(row["route"], ensure_ascii=False)
-        + ',"dep_date":'
-        + json.dumps(row["dep_date"])
-        + ',"return_date":'
-        + json.dumps(row["return_date"])
-        + ',"flight_type":'
-        + json.dumps(row["flight_type"])
-        + ',"origin":'
-        + json.dumps(row["origin"])
-        + ',"destination":'
-        + json.dumps(row["destination"])
-        + ',"flights":'
-        + row["flights"]
-        + ',"searched_at":'
-        + json.dumps(row["searched_at"])
-        + "}\n"
+    head = json.dumps(
+        {
+            k: row[k]
+            for k in (
+                "route",
+                "dep_date",
+                "return_date",
+                "flight_type",
+                "origin",
+                "destination",
+            )
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
+    tail = json.dumps({"searched_at": row["searched_at"]}, separators=(",", ":"))
+    # flights is already serialised JSON; splice it in unescaped.
+    return f'{head[:-1]},"flights":{row["flights"]},{tail[1:]}\n'
 
 
 async def convert(

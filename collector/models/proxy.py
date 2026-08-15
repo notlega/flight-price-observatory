@@ -18,7 +18,7 @@ class ProxyInfoDict(TypedDict):
     source: str
 
 
-@dataclass
+@dataclass(slots=True)
 class ProxyInfo:
     url: str
     protocol: str
