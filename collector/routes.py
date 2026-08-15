@@ -28,6 +28,8 @@ class RouteCatalog:
         "HND",
         "PVG",
         "PEK",
+        "ICN",
+        "PUS",
     )
     ROUND_TRIP_OFFSETS = (7, 14, 21)
 
