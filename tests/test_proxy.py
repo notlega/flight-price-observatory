@@ -284,7 +284,16 @@ def test_build_sources_entries_well_formed():
 
 
 def test_build_sources_count():
-    assert len(_build_sources()) == 64
+    assert len(_build_sources()) == 15
+
+
+def test_build_sources_keeps_only_high_yield_sources():
+    urls = [url for _, url in _build_sources()]
+    assert any("databay.com/api/v1" in u for u in urls)
+    assert any("ClearProxy" in u for u in urls)
+    assert not any("hproxy" in u for u in urls)
+    assert not any("proxifly" in u for u in urls)
+    assert not any("openproxylist" in u for u in urls)
 
 
 def test_normalise_url_bare_ipv6():

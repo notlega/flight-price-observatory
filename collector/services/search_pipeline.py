@@ -41,7 +41,6 @@ _PROGRESS_LOG_STEP_PCT = 5
 _MIN_POOL_BEFORE_RETRY = 20
 _NO_PROXY_DELAY = 0.5
 _STUB_BACKOFF_S = 30
-_STUB_QUERY_THRESHOLD = 4
 
 
 @dataclass(slots=True, kw_only=True)
@@ -107,7 +106,6 @@ class BulkSearchPipeline:
         self.db_path = db_path
         self.currency = currency
         self.keep_db = keep_db
-        self._stub_counts: dict[tuple[str, str, str, str | None], int] = {}
 
     async def _attempt_once(
         self,
@@ -172,23 +170,8 @@ class BulkSearchPipeline:
     ) -> None:
         searched_at = datetime.now(timezone.utc).isoformat()
         error_type: str | None = None
-        stub_key = (
-            task.origin.value,
-            task.dest.value,
-            task.departure,
-            task.return_date,
-        )
 
         for attempt in range(_MAX_ATTEMPTS):
-            if self._stub_counts.get(stub_key, 0) >= _STUB_QUERY_THRESHOLD:
-                logger.info(
-                    "Skipping %s->%s on %s: query stub-cooldowned (%d consecutive stubs)",
-                    task.origin.value,
-                    task.dest.value,
-                    task.departure,
-                    self._stub_counts[stub_key],
-                )
-                break
             result = await self._attempt_once(
                 task.provider,
                 task.origin,
@@ -204,7 +187,6 @@ class BulkSearchPipeline:
             ):
                 await self.rotator.report_failure(result.proxy_info)
             if result.error_type is None:
-                self._stub_counts[stub_key] = 0
                 await self._store_result(
                     task,
                     flights=result.flights,
@@ -225,16 +207,6 @@ class BulkSearchPipeline:
                 result.error_type,
             )
             if result.stubbed:
-                self._stub_counts[stub_key] = self._stub_counts.get(stub_key, 0) + 1
-                if self._stub_counts[stub_key] >= _STUB_QUERY_THRESHOLD:
-                    logger.info(
-                        "Query stub-cooldowned %s->%s on %s after %d consecutive stubs",
-                        task.origin.value,
-                        task.dest.value,
-                        task.departure,
-                        self._stub_counts[stub_key],
-                    )
-                    break
                 await asyncio.sleep(_STUB_BACKOFF_S)
 
         await self._store_result(
@@ -256,6 +228,8 @@ class BulkSearchPipeline:
         success: bool,
         searched_at: str,
     ) -> None:
+        if not success and error_type is None:
+            raise ValueError("failed result must carry an error_type")
         await self.repo.upsert(
             route=_route_key(task.origin, task.dest),
             dep_date=task.departure,

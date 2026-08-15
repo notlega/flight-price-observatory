@@ -58,62 +58,49 @@ _ALIVE_TO_VALID_MULTIPLIER = 30
 
 
 def _build_sources() -> list[tuple[str, str]]:
-    protocols = ["http", "https", "socks4", "socks5"]
     gh = "https://raw.githubusercontent.com/"
     js = "https://cdn.jsdelivr.net/gh/"
-    sources: list[tuple[str, str]] = []
-    for p in protocols:
-        sources.append((p, f"{gh}iplocate/free-proxy-list/main/protocols/{p}.txt"))
-        sources.append((p, f"https://vakhov.github.io/fresh-proxy-list/{p}.txt"))
-        sources.append(
-            (p, f"{js}proxyscrape/free-proxy-list@main/proxies/protocols/{p}/data.txt")
-        )
-        sources.append(
-            (p, f"{js}proxifly/free-proxy-list@main/proxies/protocols/{p}/data.txt")
-        )
-        sources.append(
-            (p, f"{gh}jetkai/proxy-list/main/online-proxies/txt/proxies-{p}.txt")
-        )
-        sources.append(
-            (p, f"{gh}Thordata/awesome-free-proxy-list/main/proxies/{p}.txt")
-        )
-        sources.append((p, f"{gh}ErcinDedeoglu/proxies/main/proxies/{p}.txt"))
-    for p in ("http", "socks4", "socks5"):
-        sources.append((p, f"{gh}monosans/proxy-list/main/proxies/{p}.txt"))
-    for p in ("http", "socks4", "socks5"):
-        sources.append((p, f"{gh}TheSpeedX/PROXY-List/master/{p}.txt"))
-    sources.append(("http", f"{gh}r00tee/Proxy-List/main/Https.txt"))
-    sources.append(("socks4", f"{gh}r00tee/Proxy-List/main/Socks4.txt"))
-    sources.append(("socks5", f"{gh}r00tee/Proxy-List/main/Socks5.txt"))
-    for p in protocols:
-        sources.append(
-            (
-                p,
-                f"https://api.proxyscrape.com/v2/?request=getproxies&protocol={p}&timeout=10000",
-            )
-        )
-    sources.append(("http", "https://proxyspace.pro/http.txt"))
-    sources.append(("https", "https://proxyspace.pro/https.txt"))
-    sources.append(("http", "https://openproxylist.xyz/http.txt"))
-    for p in protocols:
-        sources.append((p, f"{js}hproxy-com/free-proxy-list@main/{p}.txt"))
-        sources.append((p, f"{js}VMHeaven/VMHeaven-Free-Proxy-Updated@main/{p}.txt"))
-    for p in ("http", "socks4", "socks5"):
-        sources.append((p, f"{js}databay-labs/free-proxy-list@master/{p}.txt"))
-        sources.append(
-            (p, f"{js}proxygenerator1/ProxyGenerator@main/MostStable/{p}.txt")
-        )
-        sources.append((p, f"{js}ClearProxy/checked-proxy-list@main/{p}/raw/all.txt"))
-    sources.append(
-        ("http", f"{js}ClearProxy/checked-proxy-list@main/custom/google/http.txt")
-    )
-    sources.append(("http", f"{js}theriturajps/proxy-list@main/proxies.txt"))
-    sources.append(
+    sources: list[tuple[str, str]] = [
+        ("http", f"{js}databay-labs/free-proxy-list@master/http.txt"),
+        ("socks5", f"{js}databay-labs/free-proxy-list@master/socks5.txt"),
+        (
+            "socks5",
+            f"{js}proxyscrape/free-proxy-list@main/proxies/protocols/socks5/data.txt",
+        ),
         (
             "http",
             "https://databay.com/api/v1/proxy-list?google=true&ssl=strict&format=txt&protocol=http",
-        )
-    )
+        ),
+        (
+            "http",
+            f"{js}proxyscrape/free-proxy-list@main/proxies/protocols/http/data.txt",
+        ),
+        (
+            "socks4",
+            f"{js}proxyscrape/free-proxy-list@main/proxies/protocols/socks4/data.txt",
+        ),
+        ("socks4", f"{js}VMHeaven/VMHeaven-Free-Proxy-Updated@main/socks4.txt"),
+        (
+            "http",
+            "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",
+        ),
+        ("socks4", f"{js}databay-labs/free-proxy-list@master/socks4.txt"),
+        ("socks5", f"{js}VMHeaven/VMHeaven-Free-Proxy-Updated@main/socks5.txt"),
+        (
+            "https",
+            f"{js}proxyscrape/free-proxy-list@main/proxies/protocols/https/data.txt",
+        ),
+        ("http", f"{gh}monosans/proxy-list/main/proxies/http.txt"),
+        ("socks5", f"{js}ClearProxy/checked-proxy-list@main/socks5/raw/all.txt"),
+        (
+            "socks4",
+            "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks4&timeout=10000",
+        ),
+        (
+            "socks5",
+            "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000",
+        ),
+    ]
     return _prioritise_sources(sources)
 
 
@@ -121,10 +108,7 @@ _PRIORITY_MARKERS = (
     "checked-proxy-list",
     "databay",
     "proxyscrape",
-    "proxyspace",
-    "moststable",
     "vmheaven",
-    "clearproxy",
 )
 
 

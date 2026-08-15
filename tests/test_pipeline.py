@@ -194,53 +194,32 @@ async def test_search_and_store_stub_backoff_sleeps_between_attempts():
     assert pipeline.repo.upserts[0]["retries"] == 3
 
 
-async def test_search_and_store_stub_cooldown_stops_after_threshold():
+async def test_search_and_store_all_stubs_burns_full_round():
     pipeline = _make_pipeline(
         provider=FakeProvider(script=[ProviderBlockedError("blocked")] * 3)
     )
-    with (
-        patch("collector.services.search_pipeline._STUB_QUERY_THRESHOLD", 2),
-        patch(
-            "collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()
-        ) as sleep,
-    ):
+    with patch(
+        "collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()
+    ) as sleep:
         await pipeline._search_and_store(_task(pipeline.providers[0]), AsyncMock())
-    assert len(pipeline.providers[0].calls) == 2
-    assert sleep.await_count == 1
+    assert len(pipeline.providers[0].calls) == 3
+    assert sleep.await_count == 3
     assert pipeline.repo.upserts[0]["success"] is False
     assert pipeline.repo.upserts[0]["error_type"] == ErrorType.DATA
     assert pipeline.repo.upserts[0]["retries"] == 3
 
 
-async def test_search_and_store_stub_cooldown_persists_across_rounds():
-    provider = FakeProvider(script=[ProviderBlockedError("blocked")] * 4)
-    pipeline = _make_pipeline(provider=provider)
-    with patch("collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()):
-        await pipeline._search_and_store(_task(provider), AsyncMock(), retry_round=0)
-        await pipeline._search_and_store(_task(provider), AsyncMock(), retry_round=1)
-    assert len(provider.calls) == 4
-    assert [u["success"] for u in pipeline.repo.upserts] == [False, False]
-    assert pipeline.repo.upserts[-1]["retries"] == 6
-
-
-async def test_search_and_store_stub_cooldown_resets_on_success():
-    provider = FakeProvider(
-        script=[
-            ProviderBlockedError("blocked"),
-            make_flights(100),
-            ProviderBlockedError("blocked"),
-            ProviderBlockedError("blocked"),
-        ]
-    )
-    pipeline = _make_pipeline(provider=provider)
-    with (
-        patch("collector.services.search_pipeline._STUB_QUERY_THRESHOLD", 2),
-        patch("collector.services.search_pipeline.asyncio.sleep", new=AsyncMock()),
-    ):
-        await pipeline._search_and_store(_task(provider), AsyncMock())
-        await pipeline._search_and_store(_task(provider), AsyncMock())
-    assert len(provider.calls) == 4
-    assert [u["success"] for u in pipeline.repo.upserts] == [True, False]
+async def test_store_result_requires_error_type_on_failure():
+    pipeline = _make_pipeline(provider=FakeProvider(script=[make_flights(100)]))
+    with pytest.raises(ValueError, match="error_type"):
+        await pipeline._store_result(
+            _task(pipeline.providers[0]),
+            flights=[],
+            error_type=None,
+            retries=3,
+            success=False,
+            searched_at="t",
+        )
 
 
 async def test_search_and_store_success_stores_once():
