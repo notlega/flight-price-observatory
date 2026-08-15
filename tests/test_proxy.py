@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from contextlib import suppress
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -733,6 +734,28 @@ async def test_get_proxy_concurrent_calls_single_refresh():
     assert all(p is not None for p in results)
 
 
+async def test_get_proxy_timeout_returns_none_without_cancelling_refresh():
+    rot = ProxyRotator()
+    started = asyncio.Event()
+
+    async def hanging_refresh():
+        started.set()
+        await asyncio.sleep(3600)
+
+    with patch.object(rot, "_auto_refresh", hanging_refresh):
+        proxy = await rot.get_proxy(await_timeout=0.01)
+        task = rot._refresh_task
+        try:
+            assert proxy is None
+            assert task is not None
+            assert not task.cancelled()
+        finally:
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+
 async def test_rotator_picks_from_pool_and_removes_failure():
     rot = ProxyRotator()
     rot._proxies = [make_proxy(url="http://a:1"), make_proxy(url="http://b:2")]
@@ -1087,6 +1110,38 @@ async def test_auto_refresh_refresh_error_keeps_state():
 
     assert rot._consecutive_force_refetches == 2
     assert rot._refresh_task is None
+
+
+async def test_auto_refresh_starved_pool_respects_refresh_gap():
+    rot = ProxyRotator()
+    rot._last_auto_refresh = time.monotonic()
+    rot._consecutive_auto_refills = 1
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == []
+
+
+async def test_auto_refresh_starved_pool_escalates_on_repeated_refills():
+    rot = ProxyRotator()
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        for _ in range(3):
+            await rot._auto_refresh()
+            rot._last_auto_refresh = float("-inf")
+            rot._last_force_refresh = float("-inf")
+
+    assert rot._consecutive_auto_refills == 3
+    assert rot._consecutive_force_refetches == 3
 
 
 async def test_auto_refresh_parked_pool_then_revive_resets_backoff():

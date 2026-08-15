@@ -141,16 +141,18 @@ class SearchRepository:
     async def _commit(self, batch: list[tuple[object, ...]]) -> None:
         if not batch:
             return
-        await self._connection.executemany(_INSERT_SQL, batch)
-        await self._connection.commit()
+        async with self._write_lock:
+            await self._connection.executemany(_INSERT_SQL, batch)
+            await self._connection.commit()
 
     async def flush(self) -> None:
         """Commit all queued writes (await the writer draining the queue)."""
         if self._conn is None or self._queue is None:
             return
-        async with self._write_lock:
-            self._queue.put_nowait(_FLUSH)
-            await self._write_queue.join()
+        # Drop the lock here: _commit takes it, so holding it while waiting on
+        # the queue would deadlock the writer.
+        self._queue.put_nowait(_FLUSH)
+        await self._write_queue.join()
 
     async def close(self) -> None:
         if self._conn is None:

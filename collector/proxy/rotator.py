@@ -5,6 +5,7 @@ import logging
 import random
 import time
 from bisect import bisect_left
+from contextlib import suppress
 
 from curl_cffi.requests import AsyncSession
 
@@ -23,6 +24,7 @@ _EMPTY_REFETCH_BACKOFF = (60, 120, 300, 600)
 _AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
+_REFRESH_AWAIT_TIMEOUT = 60.0
 
 
 class ProxyRotator:
@@ -45,6 +47,7 @@ class ProxyRotator:
         self._last_force_refresh = float("-inf")
         self._last_auto_refresh = float("-inf")
         self._consecutive_force_refetches = 0
+        self._consecutive_auto_refills = 0
         self._blacklist: dict[str, float] = {}
         self._real_ip: str = ""
 
@@ -259,15 +262,23 @@ class ProxyRotator:
             proxy = pool[min(i, len(pool) - 1)]
         return proxy
 
-    async def get_proxy(self) -> ProxyInfo | None:
-        """Return the next usable proxy, triggering a refresh when empty."""
+    async def get_proxy(
+        self, await_timeout: float = _REFRESH_AWAIT_TIMEOUT
+    ) -> ProxyInfo | None:
+        """Return the next usable proxy, triggering a refresh when empty.
+
+        Args:
+            await_timeout: Cap on how long an in-flight refresh is awaited;
+                on timeout the refresh keeps running and None is returned.
+        """
         async with self._lock:
             proxy = self._pick()
         if proxy is None:
             await self._ensure_refresh_task()
             task = self._refresh_task
             if task is not None and not task.done():
-                await task
+                with suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(task), timeout=await_timeout)
             async with self._lock:
                 proxy = self._pick()
         return proxy
@@ -285,20 +296,22 @@ class ProxyRotator:
             # after each refill left a dead pool (3 proxies) sitting idle for
             # minutes during retry rounds. Repeated refills are bounded by the
             # refresh itself + the empty-pool force-refetch backoff below.
-            if (
-                now - self._last_auto_refresh < _AUTO_REFRESH_GAP
-                and self.usable_count() >= _REFILL_THRESHOLD
-            ):
-                return
+            if now - self._last_auto_refresh < _AUTO_REFRESH_GAP:
+                if self.usable_count() >= _REFILL_THRESHOLD:
+                    return
+                if self._consecutive_auto_refills > 0:
+                    return
             self._last_auto_refresh = now
             logger.info("Proxy pool exhausted; auto-refreshing")
             await self.refresh(max_per_source=sources.REFILL_MAX_PER_SOURCE)
             usable = self.usable_count()
             if usable > 0:
                 self._consecutive_force_refetches = 0
+                self._consecutive_auto_refills = 0
                 return
+            self._consecutive_auto_refills += 1
             index = min(
-                self._consecutive_force_refetches,
+                self._consecutive_auto_refills - 1,
                 len(_EMPTY_REFETCH_BACKOFF) - 1,
             )
             cooldown = _EMPTY_REFETCH_BACKOFF[index]

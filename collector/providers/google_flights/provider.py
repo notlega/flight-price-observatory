@@ -23,7 +23,6 @@ from fli.search._urls import with_locale_params
 from fli.search._wire import parse_first_wrb_payload
 from pydantic import ValidationError
 
-from collector import _fli_airports  # noqa: F401  # type: ignore[reportUnusedImport]
 from collector.errors import (
     ProviderBlockedError,
     ProviderConnectionError,
@@ -87,7 +86,7 @@ def _parse_flights(flights_raw: list[Any]) -> list[FlightResult]:
     for row in flights_raw:
         try:
             flights.append(parse_flight_row(row))
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, IndexError) as e:
             logger.debug("Skipping unparseable flight row: %s", e)
     return flights
 
@@ -105,6 +104,9 @@ class GoogleFlightsProvider(BaseProvider):
     name = "google_flights"
 
     def __init__(self, rt_expand_top_n: int = 3) -> None:
+        from collector._fli_airports import init
+
+        init()
         self._rt_expand_top_n = rt_expand_top_n
 
     @property

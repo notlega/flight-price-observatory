@@ -7,7 +7,7 @@ from curl_cffi import requests
 from fli.models import Airport
 from fli.search import _decoders as _fli_decoders
 
-from collector._fli_airports import _extend_airport_enum, _patch_fli_airports
+from collector._fli_airports import _extend_airport_enum, init
 from collector.errors import (
     ProviderBlockedError,
     ProviderConnectionError,
@@ -35,6 +35,7 @@ def test_rt_expand_top_n_defaults_to_three():
 
 
 def test_fli_airport_patch_resolves_extra_codes():
+    init()
     assert _fli_decoders._AIRPORT_BY_CODE["YIC"] is Airport["YIC"]
     assert _fli_decoders._AIRPORT_BY_CODE["OKA"] is Airport["NAH"]
     assert _fli_decoders._parse_airport("YIC") is Airport["YIC"]
@@ -43,7 +44,7 @@ def test_fli_airport_patch_resolves_extra_codes():
 
 def test_fli_airport_patch_is_idempotent():
     member = Airport["YIC"]
-    _patch_fli_airports()
+    init()
     assert Airport["YIC"] is member
     assert Airport._member_map_["YIC"] is member
 
