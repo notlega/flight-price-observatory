@@ -150,7 +150,7 @@ uv sync
 ## Running Locally
 
 ```
-# Search next 330 days
+# Search next 270 days
 uv run python -m cli search
 
 # Custom window
@@ -179,7 +179,7 @@ uv run lint
 | Flag        | Default | Description          |
 |-------------|---------|----------------------|
 | `--start`   | today   | Start date (YYYY-MM-DD) |
-| `--max-days`| 330     | Days ahead from start |
+| `--max-days`| 270     | Days ahead from start |
 | `--currency`| SGD     | Currency code for pricing |
 | `--rate`    | 200     | Requests per second  |
 | `--workers` | 50     | Max concurrent searches |
