@@ -68,7 +68,7 @@ Adaptive token bucket (`collector/services/rate_limiter.py`):
 - Sources fetched from 27 list endpoints; results cached to `storage/proxy_cache.json` (fresh 30 min, revalidated up to 24 h).
 - `refresh()` uses cache when fresh; revalidates stale cache up to 24 h; fetches fresh when cache missing, expired, or all cached proxies dead.
 - **Eviction & blacklist:** a proxy blacklisted after 3×429 (30 min) or one dead-proxy failure (10 min) is excluded from cache re-population; cache-fresh path only adopts the cached pool if it has more *usable* proxies than the live pool (never clobbers live survivors).
-- **Refill:** auto-refresh throttled to one attempt / 5 s. Empty pool (0 usable) force-refetches after 60 s; low-but-nonempty pool after 30 min.
+- **Refill:** auto-refresh throttled to one attempt / 5 s — the gap is bypassed while the pool is starved (< `_REFILL_THRESHOLD` usable), so a dead pool refills back-to-back instead of idling 5 minutes. Empty pool (0 usable) force-refetches after 60 s; low-but-nonempty pool after 30 min.
 - **Usable vs working:** "usable" excludes rate-limit-parked proxies, so an all-parked pool triggers fast refill instead of blocking on the 30-min cooldown.
 
 ## Persistence

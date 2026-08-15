@@ -76,6 +76,9 @@ class FakeRotator:
     def working_count(self) -> int:
         return self._working
 
+    def usable_count(self) -> int:
+        return self._working
+
     async def refresh(self, force: bool = False, max_per_source: int | None = None):
         self.refreshes.append((force, max_per_source))
 

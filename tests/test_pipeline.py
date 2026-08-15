@@ -355,6 +355,83 @@ async def test_other_error_not_reported_to_rotator():
     assert pipeline.repo.upserts[0]["error_type"] == ErrorType.OTHER
 
 
+async def test_run_batch_mid_round_refresh_single_flight():
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[], working=1)
+    pipeline = _make_pipeline(provider=provider, rotator=rotator)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._run_batch(
+            [
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                )
+            ],
+            "test",
+            retry_round=1,
+        )
+    assert rotator.refreshes == [(True, None)]
+
+
+async def test_run_batch_mid_round_refresh_not_for_first_pass():
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[], working=1)
+    pipeline = _make_pipeline(provider=provider, rotator=rotator)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._run_batch(
+            [
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                )
+            ],
+            "test",
+        )
+    assert rotator.refreshes == []
+
+
+async def test_run_batch_mid_round_refresh_failure_logged(caplog):
+    provider = FakeProvider(script=[make_flights(100)])
+    rotator = FakeRotator(proxies=[], working=1)
+
+    async def boom_refresh(*args, **kwargs):
+        raise RuntimeError("list fetch failed")
+
+    rotator.refresh = boom_refresh  # type: ignore[method-assign]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator)
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._run_batch(
+            [
+                SearchTask(
+                    provider=provider,
+                    origin=SIN,
+                    dest=KUL,
+                    departure=DEP,
+                    return_date=None,
+                    flight_type=FlightType.ONE_WAY.value,
+                )
+            ],
+            "test",
+            retry_round=1,
+        )
+    assert pipeline._mid_refresh is False
+    assert "Mid-round proxy refresh failed" in caplog.text
+
+
 async def test_run_batch_records_unexpected_failure():
     class FlakyRepo(FakeRepo):
         def __init__(self):
@@ -504,7 +581,7 @@ async def test_retry_loop_refreshes_when_pool_low():
 
 
 @pytest.mark.parametrize("working", [19, 20])
-async def test_retry_loop_refresh_threshold_boundary(working):
+async def test_retry_loop_round1_always_refreshes_threshold_for_round2(working):
     provider = FakeProvider(script=[make_flights(100)])
     rotator = FakeRotator(proxies=[make_proxy()], working=working)
     repo = FakeRepo()
@@ -513,11 +590,13 @@ async def test_retry_loop_refresh_threshold_boundary(working):
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
     ):
-        await pipeline._retry_loop(rounds=1)
+        await pipeline._retry_loop(rounds=2)
+    # Round 1 always force-refreshes (stale pool throttled regardless of size);
+    # the low-pool threshold applies from round 2 onward.
     if working < _MIN_POOL_BEFORE_RETRY:
-        assert rotator.refreshes
+        assert rotator.refreshes == [(True, None), (True, None)]
     else:
-        assert rotator.refreshes == []
+        assert rotator.refreshes == [(True, None)]
 
 
 def test_dates_between_filters_past_and_future():
@@ -645,7 +724,7 @@ async def test_retry_loop_skips_past_departures():
     repo.upserts = [{"error_type": ErrorType.CONNECTION, "success": False}]
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     await pipeline._retry_loop(rounds=3)
-    assert rotator.refreshes == []
+    assert len(rotator.refreshes) == 1
     assert len(repo.upserts) == 1
 
 

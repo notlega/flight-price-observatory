@@ -20,7 +20,7 @@ Long search runs over a shared proxy pool produced several failure modes:
 - **Eviction:** 3×429 evicts a proxy and blacklists it for 30 min. Dead (timeout/connection) proxies blacklisted for 10 min.
 - **Blame only real faults:** `Timeout`/`Connection` errors trigger `report_failure`. `OTHER` and `DATA` errors never blame the proxy.
 - **Past-date guard:** task build skips `dep_date < today`; retry loop skips past-departure failures; provider maps stale-date validation to `ProviderDataError`.
-- **Refill:** auto-refresh throttled to 1 attempt / 5 s. 0 usable → force-refetch after 60 s; low-but-nonempty → after 30 min. "Usable" excludes rate-limit-parked proxies.
+- **Refill:** auto-refresh throttled to 1 attempt / 5 s, with the gap bypassed while the pool is starved (< `_REFILL_THRESHOLD` usable) so recovery is back-to-back. 0 usable → force-refetch after 60 s; low-but-nonempty → after 30 min. "Usable" excludes rate-limit-parked proxies.
 - **Cache safety:** blacklisted proxies excluded from cache re-population; cache-fresh path only adopts the filtered pool if larger than the current usable pool.
 - **Preflight refill:** `run()` force-refetches once before aborting on zero working proxies.
 - **Source breadth:** 44 → 64 sources. New lists fetched via jsDelivr CDN (`cdn.jsdelivr.net/gh/…`) mirrors of GitHub repos to dodge `raw.githubusercontent.com` rate limits during refresh cycles. Includes Google-verified subsets (ClearProxy `custom/google`, Databay `google=true` API) targeting the 429 burn on Google Flights. Databay API `#` comment lines fall through the parser's port check and are dropped.

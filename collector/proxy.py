@@ -678,7 +678,14 @@ class ProxyRotator:
     async def _auto_refresh(self) -> None:
         try:
             now = time.monotonic()
-            if now - self._last_auto_refresh < _AUTO_REFRESH_GAP:
+            # Bypass the gap when the pool is still starved: a 5-minute cooldown
+            # after each refill left a dead pool (3 proxies) sitting idle for
+            # minutes during retry rounds. Repeated refills are bounded by the
+            # refresh itself + the empty-pool force-refetch backoff below.
+            if (
+                now - self._last_auto_refresh < _AUTO_REFRESH_GAP
+                and self.usable_count() >= _REFILL_THRESHOLD
+            ):
                 return
             self._last_auto_refresh = now
             logger.info("Proxy pool exhausted; auto-refreshing")

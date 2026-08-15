@@ -920,6 +920,7 @@ async def test_auto_refresh_cooldown_blocks_refill():
 
 async def test_auto_refresh_gap_skips_repeated_attempts():
     rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(20)])
     rot._last_auto_refresh = time.monotonic()
     calls = []
 
@@ -930,6 +931,21 @@ async def test_auto_refresh_gap_skips_repeated_attempts():
         await rot._auto_refresh()
 
     assert calls == []
+
+
+async def test_auto_refresh_gap_bypassed_when_pool_starved():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url="http://p1:1")])
+    rot._last_auto_refresh = time.monotonic()
+    calls = []
+
+    async def fake_refresh(**kwargs):
+        calls.append(kwargs)
+
+    with patch.object(rot, "refresh", side_effect=fake_refresh):
+        await rot._auto_refresh()
+
+    assert calls == [{"max_per_source": 750}]
 
 
 async def test_auto_refresh_empty_pool_escalates_backoff():

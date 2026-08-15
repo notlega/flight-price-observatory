@@ -106,6 +106,7 @@ class BulkSearchPipeline:
         self.db_path = db_path
         self.currency = currency
         self.keep_db = keep_db
+        self._mid_refresh = False
 
     async def _attempt_once(
         self,
@@ -297,6 +298,18 @@ class BulkSearchPipeline:
                     finally:
                         done += 1
                         log_progress()
+                    if (
+                        retry_round > 0
+                        and self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY
+                        and not self._mid_refresh
+                    ):
+                        self._mid_refresh = True
+                        try:
+                            await self.rotator.refresh(force=True)
+                        except Exception:
+                            logger.exception("Mid-round proxy refresh failed")
+                        finally:
+                            self._mid_refresh = False
 
         n_workers = min(max(self.max_concurrent, 1), max(total, 1))
         workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
@@ -348,7 +361,17 @@ class BulkSearchPipeline:
             if not failed:
                 logger.info("No failed tasks to retry")
                 return
-            if self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY:
+            if rnd == 1:
+                # Retry queries failed on the first-pass pool, which Google has
+                # throttled; a fresh pool is the main recovery lever (measured:
+                # pool 3 -> 62 recovered 226/240 in round 3 vs 0/240 in rounds
+                # 1-2 on the stale pool).
+                logger.info(
+                    "Refreshing proxy pool before retry round 1 (%d usable)",
+                    self.rotator.usable_count(),
+                )
+                await self.rotator.refresh(force=True)
+            elif self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY:
                 logger.info(
                     "Proxy pool low (%d); refreshing before retry round %d",
                     self.rotator.working_count(),
