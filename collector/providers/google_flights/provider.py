@@ -288,8 +288,7 @@ class GoogleFlightsProvider(BaseProvider):
         Returns:
             Serialised flight results, or None when no flights are found.
         """
-        self._require_proxy(proxy_url)
-        assert proxy_url is not None, "enforced by _require_proxy"
+        proxy_url = self._require_proxy(proxy_url)
 
         try:
             filters = self._build_filters(origin, dest, date_str, return_date)

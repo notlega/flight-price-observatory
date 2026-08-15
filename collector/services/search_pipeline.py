@@ -245,6 +245,36 @@ class BulkSearchPipeline:
             searched_at=searched_at,
         )
 
+    async def _process_task(
+        self,
+        task: SearchTask,
+        retry_round: int,
+        session: AsyncSession,
+    ) -> None:
+        try:
+            await self._search_and_store(task, session, retry_round=retry_round)
+        except Exception as e:
+            logger.warning(
+                "Task failed unexpectedly for %s->%s on %s: %s",
+                task.origin.value,
+                task.dest.value,
+                task.departure,
+                e,
+            )
+            await self._record_failure(task, retry_round)
+        if (
+            retry_round > 0
+            and self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY
+            and not self._mid_refresh
+        ):
+            self._mid_refresh = True
+            try:
+                await self.rotator.refresh(force=True)
+            except Exception:
+                logger.exception("Mid-round proxy refresh failed")
+            finally:
+                self._mid_refresh = False
+
     async def _run_batch(
         self,
         tasks: list[SearchTask],
@@ -283,33 +313,10 @@ class BulkSearchPipeline:
                     except asyncio.QueueEmpty:
                         return
                     try:
-                        await self._search_and_store(
-                            task, session, retry_round=retry_round
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Task failed unexpectedly for %s->%s on %s: %s",
-                            task.origin.value,
-                            task.dest.value,
-                            task.departure,
-                            e,
-                        )
-                        await self._record_failure(task, retry_round)
+                        await self._process_task(task, retry_round, session)
                     finally:
                         done += 1
                         log_progress()
-                    if (
-                        retry_round > 0
-                        and self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY
-                        and not self._mid_refresh
-                    ):
-                        self._mid_refresh = True
-                        try:
-                            await self.rotator.refresh(force=True)
-                        except Exception:
-                            logger.exception("Mid-round proxy refresh failed")
-                        finally:
-                            self._mid_refresh = False
 
         n_workers = min(max(self.max_concurrent, 1), max(total, 1))
         workers = [asyncio.create_task(worker()) for _ in range(n_workers)]
@@ -419,20 +426,17 @@ class BulkSearchPipeline:
         if by_error:
             logger.warning("Failed breakdown: %s", dict(by_error))
 
-    def _tasks_for_provider(
+    async def _build_tasks(
         self,
-        provider: BaseProvider,
         start_date: date,
         effective_end: date,
-        today: date,
     ) -> tuple[list[SearchTask], list[SeedRow]]:
         tasks: list[SearchTask] = []
         seed_rows: list[SeedRow] = []
-
-        def supports(origin: str, dest: str) -> bool:
-            return provider.supports is None or (origin, dest) in provider.supports
+        today = date.today()
 
         def emit(
+            provider: BaseProvider,
             origin: Airport,
             dest: Airport,
             dep_date: date,
@@ -463,45 +467,35 @@ class BulkSearchPipeline:
                 )
             )
 
-        for r in RouteCatalog.one_way_routes():
-            if not supports(r.origin, r.dest):
-                continue
-            origin = RouteCatalog.resolve(r.origin)
-            dest = RouteCatalog.resolve(r.dest)
-            for current in _dates_between(start_date, effective_end, today):
-                emit(origin, dest, current, None)
-
-        for r in RouteCatalog.round_trip_routes():
-            if not supports(r.origin, r.dest):
-                continue
-            origin = RouteCatalog.resolve(r.origin)
-            dest = RouteCatalog.resolve(r.dest)
-            for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
-                for current in _dates_between(start_date, effective_end, today):
-                    emit(
-                        origin,
-                        dest,
-                        current,
-                        (current + timedelta(days=offset)).isoformat(),
-                    )
-
-        return tasks, seed_rows
-
-    async def _build_tasks(
-        self,
-        start_date: date,
-        effective_end: date,
-    ) -> tuple[list[SearchTask], list[SeedRow]]:
-        tasks: list[SearchTask] = []
-        seed_rows: list[SeedRow] = []
-        today = date.today()
-
         for provider in self.providers:
-            provider_tasks, provider_seeds = self._tasks_for_provider(
-                provider, start_date, effective_end, today
-            )
-            tasks.extend(provider_tasks)
-            seed_rows.extend(provider_seeds)
+            for r in RouteCatalog.one_way_routes():
+                if (
+                    provider.supports is not None
+                    and (r.origin, r.dest) not in provider.supports
+                ):
+                    continue
+                origin = RouteCatalog.resolve(r.origin)
+                dest = RouteCatalog.resolve(r.dest)
+                for current in _dates_between(start_date, effective_end, today):
+                    emit(provider, origin, dest, current, None)
+
+            for r in RouteCatalog.round_trip_routes():
+                if (
+                    provider.supports is not None
+                    and (r.origin, r.dest) not in provider.supports
+                ):
+                    continue
+                origin = RouteCatalog.resolve(r.origin)
+                dest = RouteCatalog.resolve(r.dest)
+                for offset in RouteCatalog.ROUND_TRIP_OFFSETS:
+                    for current in _dates_between(start_date, effective_end, today):
+                        emit(
+                            provider,
+                            origin,
+                            dest,
+                            current,
+                            (current + timedelta(days=offset)).isoformat(),
+                        )
 
         return tasks, seed_rows
 

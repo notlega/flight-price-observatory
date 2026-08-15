@@ -10,4 +10,4 @@ def test_require_proxy_raises_without_url():
 
 
 def test_require_proxy_accepts_url():
-    assert BaseProvider._require_proxy("http://p:1") is None
+    assert BaseProvider._require_proxy("http://p:1") == "http://p:1"

@@ -17,11 +17,12 @@ class BaseProvider(ABC):
         return None
 
     @staticmethod
-    def _require_proxy(proxy_url: str | None) -> None:
+    def _require_proxy(proxy_url: str | None) -> str:
         if proxy_url is None:
             raise ProviderConnectionError(
                 "proxy_url is required — direct connections are forbidden"
             )
+        return proxy_url
 
     @abstractmethod
     async def search(
