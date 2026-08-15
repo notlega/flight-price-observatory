@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, patch
 from collector.manager import CollectorManager
 from collector.providers.base import BaseProvider
 from collector.registry import ProviderRegistry
-
 from tests.libs.fakes import FakeProvider
 
 

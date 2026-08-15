@@ -4,16 +4,14 @@ import time
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
 from curl_cffi.requests import exceptions as curl_exceptions
-
 
 from collector.models.proxy import ProxyInfo
 from collector.proxy import (
-    ProxyRotator,
     _ALIVE_TO_VALID_MULTIPLIER,
     _CACHE_FRESH_TTL,
     _CACHE_MAX_AGE,
+    ProxyRotator,
     _build_sources,
     _extract_ip,
     _load_cache,
@@ -27,7 +25,6 @@ from collector.proxy import (
     _test_http_echo,
     _validate_proxy,
 )
-
 from tests.libs.factories import make_proxy
 from tests.libs.fakes import FakeCurlSession, FakeResponse
 
@@ -146,7 +143,7 @@ def test_extract_ip_ipv6_via_json():
 async def test_probe_url_rejects_transparent_proxy():
     session = AsyncMock()
     session.get = AsyncMock(return_value=FakeResponse(200, "9.9.9.9"))
-    with patch("collector.proxy._REAL_IP", "9.9.9.9"):
+    with patch("collector.proxy._real_ip", "9.9.9.9"):
         assert await _probe_url("http://a:1", "https://u", session, 5.0) is None
 
 
@@ -171,7 +168,7 @@ async def test_probe_url_rejects_http_error():
 async def test_probe_url_returns_latency_on_success():
     session = AsyncMock()
     session.get = AsyncMock(return_value=FakeResponse(200, "1.2.3.4"))
-    with patch("collector.proxy._REAL_IP", "9.9.9.9"):
+    with patch("collector.proxy._real_ip", "9.9.9.9"):
         latency = await _probe_url("http://a:1", "https://u", session, 5.0)
     assert latency is not None
     assert latency >= 0

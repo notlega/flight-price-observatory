@@ -14,7 +14,7 @@ from collector.config import (
 
 
 def configure_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # type: ignore[reportPrivateUsage]
 ) -> None:
     p = subparsers.add_parser("search", help="Bulk flight search")
     p.add_argument(

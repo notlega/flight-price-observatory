@@ -1,14 +1,15 @@
+import argparse
 import logging
 import sys
 from datetime import date, timedelta
-import argparse
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import cli.__main__ as mainmod
 from cli.convert import run as convert_run
-from cli.search import _ahead_days, _async_run, run as search_run
+from cli.search import _ahead_days, _async_run
+from cli.search import run as search_run
 
 
 def test_main_requires_subcommand(monkeypatch):

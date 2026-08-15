@@ -2,11 +2,11 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 from curl_cffi import requests
+from fli.models import Airport
 
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
 from collector.repository import SeedRow
-from fli.models import Airport
 
 _MISSING = object()
 

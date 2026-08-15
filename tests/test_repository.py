@@ -7,7 +7,7 @@ import aiosqlite
 import pytest
 
 from collector.errors import ErrorType
-from collector.repository import SearchRepository, _RETRY_ERROR_TYPES
+from collector.repository import _RETRY_ERROR_TYPES, SearchRepository
 from collector.services.search_pipeline import _MAX_ATTEMPTS
 
 

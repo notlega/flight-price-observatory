@@ -8,7 +8,7 @@ from collector.convert import convert
 
 
 def configure_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # type: ignore[reportPrivateUsage]
 ) -> None:
     p = subparsers.add_parser("convert", help="Convert SQLite state to JSONL")
     p.add_argument(

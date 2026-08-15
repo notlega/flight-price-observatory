@@ -3,6 +3,7 @@
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from collector.repository import SearchRepository
 
@@ -18,7 +19,7 @@ def default_output_path() -> str:
     return f"{DEFAULT_RAW_DIR}/search_{ts}.jsonl"
 
 
-def _jsonl_row(row: dict) -> str:
+def _jsonl_row(row: dict[str, Any]) -> str:
     return (
         '{"route":'
         + json.dumps(row["route"], ensure_ascii=False)

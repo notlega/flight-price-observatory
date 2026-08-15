@@ -1,6 +1,7 @@
 """Route catalog: one-way and round-trip route definitions."""
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from fli.models import Airport
 
@@ -32,7 +33,7 @@ class RouteCatalog:
 
     @classmethod
     def one_way_routes(cls) -> list[Route]:
-        routes = []
+        routes: list[Route] = []
         for dest in cls.DESTINATIONS:
             routes.append(Route(cls.HUB, dest))
             routes.append(Route(dest, cls.HUB))
@@ -42,7 +43,7 @@ class RouteCatalog:
     def round_trip_routes(cls) -> list[Route]:
         return [Route(cls.HUB, dest) for dest in cls.DESTINATIONS]
 
-    iri_map = {
+    iri_map: ClassVar[dict[str, Airport]] = {
         "SIN": Airport["SIN"],
         "KUL": Airport["KUL"],
         "CGK": Airport["CGK"],

@@ -1,5 +1,4 @@
 from collector.models.proxy import ProxyInfo
-
 from tests.libs.factories import make_proxy
 
 

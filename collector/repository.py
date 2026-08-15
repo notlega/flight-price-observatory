@@ -6,15 +6,17 @@ import logging
 import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any, NamedTuple, cast
 
 import aiosqlite
-from typing import NamedTuple
 
 from collector.errors import ErrorType
 
 logger = logging.getLogger(__name__)
 
 _BUSY_TIMEOUT_MS = 10000
+
+_WriteItem = tuple[object, ...] | object
 
 
 class SeedRow(NamedTuple):
@@ -46,8 +48,10 @@ CREATE TABLE IF NOT EXISTS search_results (
 """
 
 _INSERT_SQL = """
-INSERT OR REPLACE INTO search_results
-    (route, dep_date, return_date, flight_type, origin, destination, flights, error_type, retries, success, searched_at)
+INSERT OR REPLACE INTO search_results (
+    route, dep_date, return_date, flight_type, origin, destination,
+    flights, error_type, retries, success, searched_at
+)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
@@ -69,8 +73,8 @@ class SearchRepository:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._conn: aiosqlite.Connection | None = None
-        self._write_queue: asyncio.Queue | None = None
-        self._writer_task: asyncio.Task | None = None
+        self._write_queue: asyncio.Queue[_WriteItem] | None = None
+        self._writer_task: asyncio.Task[None] | None = None
         self._write_lock = asyncio.Lock()
 
     @property
@@ -79,7 +83,7 @@ class SearchRepository:
         return self._conn
 
     @property
-    def _q(self) -> asyncio.Queue:
+    def _q(self) -> asyncio.Queue[_WriteItem]:
         assert self._write_queue is not None, "writer queue not started"
         return self._write_queue
 
@@ -114,7 +118,7 @@ class SearchRepository:
             await self._c.execute("DROP TABLE search_results")
 
     async def _writer_loop(self) -> None:
-        batch: list[tuple] = []
+        batch: list[tuple[object, ...]] = []
         while True:
             item = await self._q.get()
             if item is _STOP:
@@ -126,13 +130,13 @@ class SearchRepository:
                 batch.clear()
                 self._q.task_done()
                 continue
-            batch.append(item)
+            batch.append(cast(tuple[object, ...], item))
             if len(batch) >= _WRITE_BATCH_SIZE:
                 await self._commit(batch)
                 batch.clear()
             self._q.task_done()
 
-    async def _commit(self, batch: list[tuple]) -> None:
+    async def _commit(self, batch: list[tuple[object, ...]]) -> None:
         if not batch:
             return
         await self._c.executemany(_INSERT_SQL, batch)
@@ -167,7 +171,7 @@ class SearchRepository:
         flight_type: str,
         origin: str,
         destination: str,
-        flights: list[dict] | None,
+        flights: list[dict[str, Any]] | None,
         error_type: str | None,
         retries: int,
         success: bool,
@@ -194,8 +198,8 @@ class SearchRepository:
     async def insert_ignore_all(self, tasks: list[SeedRow]) -> None:
         sql = (
             "INSERT OR IGNORE INTO search_results "
-            "(route, dep_date, return_date, flight_type, origin, destination, retries, success) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, 0)"
+            "(route, dep_date, return_date, flight_type, origin, destination, "
+            "retries, success) VALUES (?, ?, ?, ?, ?, ?, 0, 0)"
         )
         async with self._write_lock:
             await self._c.executemany(sql, tasks)
@@ -255,7 +259,7 @@ class SearchRepository:
         rows = await cursor.fetchall()
         return [(r[0], r[1]) for r in rows]
 
-    async def _iter_successful(self, raw: bool) -> AsyncIterator[dict]:
+    async def _iter_successful(self, raw: bool) -> AsyncIterator[dict[str, Any]]:
         cursor = await self._c.execute(
             "SELECT route, dep_date, return_date, flight_type, origin, "
             "destination, flights, searched_at "
@@ -263,10 +267,9 @@ class SearchRepository:
         )
         async for row in cursor:
             flights = row[6]
-            if raw:
-                flights = flights or "[]"
-            else:
-                flights = json.loads(flights) if flights else []
+            flights: Any = (
+                flights or "[]" if raw else json.loads(flights) if flights else []
+            )
             yield {
                 "route": row[0],
                 "dep_date": row[1],
@@ -278,11 +281,11 @@ class SearchRepository:
                 "searched_at": row[7],
             }
 
-    async def iter_successful(self) -> AsyncIterator[dict]:
+    async def iter_successful(self) -> AsyncIterator[dict[str, Any]]:
         async for row in self._iter_successful(raw=False):
             yield row
 
-    async def iter_successful_raw(self) -> AsyncIterator[dict]:
+    async def iter_successful_raw(self) -> AsyncIterator[dict[str, Any]]:
         async for row in self._iter_successful(raw=True):
             yield row
 

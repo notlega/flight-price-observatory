@@ -1,6 +1,21 @@
 """Proxy pool entry model and cache serialisation."""
 
 from dataclasses import dataclass
+from typing import TypedDict
+
+
+class ProxyInfoDict(TypedDict):
+    """Serialised form of :class:`ProxyInfo` as written to the cache file."""
+
+    url: str
+    protocol: str
+    quality_score: float
+    latency_ms: float
+    last_validated: float
+    rate_limit_until: float
+    rate_limited_count: int
+    stub_count: int
+    source: str
 
 
 @dataclass
@@ -15,7 +30,7 @@ class ProxyInfo:
     stub_count: int = 0
     source: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> ProxyInfoDict:
         return {
             "url": self.url,
             "protocol": self.protocol,
@@ -29,7 +44,7 @@ class ProxyInfo:
         }
 
     @staticmethod
-    def from_dict(data: dict) -> "ProxyInfo":
+    def from_dict(data: ProxyInfoDict) -> ProxyInfo:
         return ProxyInfo(
             url=data["url"],
             protocol=data["protocol"],

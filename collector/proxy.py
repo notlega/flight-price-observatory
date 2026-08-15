@@ -9,7 +9,9 @@ import random
 import re
 import time
 from bisect import bisect_left
+from contextlib import suppress
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 from curl_cffi.requests import AsyncSession
@@ -229,7 +231,7 @@ async def _parse_all_sources(max_per_source: int = 0) -> list[ProxyInfo]:
     return unique
 
 
-_REAL_IP: str = ""
+_real_ip: str = ""
 
 _BLOCK_MARKERS = ("captcha", "unusual traffic", "attention required", "access denied")
 
@@ -246,10 +248,11 @@ def _valid_ip(candidate: str) -> bool:
 
 def _extract_ip(text: str) -> str | None:
     try:
-        data = json.loads(text)
+        data: Any = json.loads(text)
         if isinstance(data, dict):
+            payload = cast(dict[str, object], data)
             for key in ("origin", "ip", "query"):
-                cand = data.get(key)
+                cand = payload.get(key)
                 if isinstance(cand, str):
                     cand = cand.split(",", 1)[0].strip()
                     if _valid_ip(cand):
@@ -314,7 +317,7 @@ async def _probe_url(
     if exit_ip is None:
         logger.debug("Proxy %s bad echo body on %s", proxy_url, url)
         return None
-    if _REAL_IP and exit_ip == _REAL_IP:
+    if _real_ip and exit_ip == _real_ip:
         logger.debug("Proxy %s transparent (leaked real IP)", proxy_url)
         return None
     lower = body.lower()
@@ -346,15 +349,13 @@ async def _tcp_alive(url: str, timeout: float = _TCP_TIMEOUT) -> bool:
         host, sep, port = hostport.rpartition(":")
         if not sep or not port:
             return False
-        reader, writer = await asyncio.wait_for(
+        _reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host.strip("[]"), int(port)),
             timeout=timeout,
         )
         writer.close()
-        try:
+        with suppress(Exception):
             await writer.wait_closed()
-        except Exception:
-            pass
         return True
     except Exception:
         return False
@@ -368,7 +369,7 @@ async def _prefilter_tcp(proxies: list[ProxyInfo]) -> list[ProxyInfo]:
             return await _tcp_alive(proxy.url)
 
     results = await asyncio.gather(*[check(p) for p in proxies])
-    return [p for p, ok in zip(proxies, results) if ok]
+    return [p for p, ok in zip(proxies, results, strict=True) if ok]
 
 
 async def _prefilter_tcp_until(
@@ -443,7 +444,7 @@ class ProxyRotator:
         self._cum_weights: list[float] = []
         self._total_weight = 0.0
         self._weight_pool_len = 0
-        self._refresh_task: asyncio.Task | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
         self._schedule_lock = asyncio.Lock()
         self._last_force_refresh = float("-inf")
         self._last_auto_refresh = float("-inf")
@@ -467,8 +468,8 @@ class ProxyRotator:
             return []
         proxies = alive
 
-        global _REAL_IP
-        _REAL_IP = await _fetch_real_ip()
+        global _real_ip
+        _real_ip = await _fetch_real_ip()
 
         queue: asyncio.Queue[ProxyInfo | None] = asyncio.Queue()
         for p in proxies:

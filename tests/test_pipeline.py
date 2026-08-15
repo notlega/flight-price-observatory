@@ -1,5 +1,5 @@
-from datetime import date, timedelta
 import logging
+from datetime import date, timedelta
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, patch
 
@@ -16,12 +16,11 @@ from collector.errors import (
 )
 from collector.models import FlightType
 from collector.services.search_pipeline import (
-    BulkSearchPipeline,
-    SearchTask,
     _MAX_ATTEMPTS,
     _MIN_POOL_BEFORE_RETRY,
+    BulkSearchPipeline,
+    SearchTask,
 )
-
 from tests.libs.factories import make_flights, make_proxy
 from tests.libs.fakes import FakeCurlSession, FakeProvider, FakeRepo, FakeRotator
 
@@ -760,9 +759,9 @@ async def test_run_preflight_refreshes_when_no_proxies(tmp_path):
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
         patch("collector.services.search_pipeline.convert", new=AsyncMock()),
+        pytest.raises(RuntimeError, match="refusing to run"),
     ):
-        with pytest.raises(RuntimeError, match="refusing to run"):
-            await pipeline.run(date(2026, 12, 1), date(2026, 12, 1), max_days_ahead=330)
+        await pipeline.run(date(2026, 12, 1), date(2026, 12, 1), max_days_ahead=330)
     assert rotator.refreshes == [(False, None), (True, None)]
 
 

@@ -3,12 +3,19 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from typing import NamedTuple
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, NamedTuple
 
 from curl_cffi.requests import AsyncSession
 from fli.models import Airport
 
+from collector.config import (
+    DEFAULT_CURRENCY,
+    DEFAULT_DB_PATH,
+    DEFAULT_MAX_DAYS_AHEAD,
+    DEFAULT_RATE,
+    DEFAULT_WORKERS,
+)
 from collector.convert import convert, default_output_path
 from collector.errors import (
     ErrorType,
@@ -22,13 +29,6 @@ from collector.models.flight_type import FlightType
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
 from collector.proxy import ProxyRotator
-from collector.config import (
-    DEFAULT_CURRENCY,
-    DEFAULT_DB_PATH,
-    DEFAULT_MAX_DAYS_AHEAD,
-    DEFAULT_RATE,
-    DEFAULT_WORKERS,
-)
 from collector.repository import SearchRepository, SeedRow
 from collector.routes import RouteCatalog
 from collector.services.progress import ProgressLogger
@@ -82,7 +82,7 @@ def _format_duration(seconds: float) -> str:
 
 
 class AttemptResult(NamedTuple):
-    flights: list[dict] | None
+    flights: list[dict[str, Any]] | None
     error_type: str | None
     proxy_info: ProxyInfo | None
     stubbed: bool = False
@@ -169,7 +169,7 @@ class BulkSearchPipeline:
         session: AsyncSession,
         retry_round: int = 0,
     ) -> None:
-        searched_at = datetime.now(timezone.utc).isoformat()
+        searched_at = datetime.now(UTC).isoformat()
         error_type: str | None = None
 
         for attempt in range(_MAX_ATTEMPTS):
@@ -223,7 +223,7 @@ class BulkSearchPipeline:
         self,
         task: SearchTask,
         *,
-        flights: list[dict] | None,
+        flights: list[dict[str, Any]] | None,
         error_type: str | None,
         retries: int,
         success: bool,
@@ -252,7 +252,7 @@ class BulkSearchPipeline:
         retry_round: int = 0,
     ) -> None:
         total = len(tasks)
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue[SearchTask] = asyncio.Queue()
         for task in tasks:
             queue.put_nowait(task)
 
@@ -331,7 +331,7 @@ class BulkSearchPipeline:
                 error_type=ErrorType.OTHER,
                 retries=(retry_round + 1) * _MAX_ATTEMPTS,
                 success=False,
-                searched_at=datetime.now(timezone.utc).isoformat(),
+                searched_at=datetime.now(UTC).isoformat(),
             )
         except Exception:
             logger.exception(
@@ -510,7 +510,7 @@ class BulkSearchPipeline:
         start_date: date,
         end_date: date,
         max_days_ahead: int = DEFAULT_MAX_DAYS_AHEAD,
-    ):
+    ) -> None:
         """Run the full bulk search lifecycle.
 
         Builds tasks, seeds the DB, refreshes the proxy pool, executes

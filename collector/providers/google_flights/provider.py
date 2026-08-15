@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from copy import deepcopy
+from typing import Any, cast
 
 from curl_cffi import requests
 from curl_cffi.requests import AsyncSession
@@ -17,12 +18,12 @@ from fli.models import (
     SortBy,
     TripType,
 )
-from pydantic import ValidationError
 from fli.search._decoders import parse_flight_row
 from fli.search._urls import with_locale_params
 from fli.search._wire import parse_first_wrb_payload
+from pydantic import ValidationError
 
-from collector import _fli_airports  # noqa: F401
+from collector import _fli_airports  # noqa: F401  # type: ignore[reportUnusedImport]
 from collector.errors import (
     ProviderBlockedError,
     ProviderConnectionError,
@@ -53,13 +54,16 @@ _FLIGHTS_PAGE_INDEXES = (2, 3)
 _BLOCK_MARKERS = ("captcha", "unusual traffic", "attention required", "access denied")
 
 
-def _extract_flights_raw(inner: list) -> list:
-    return [
-        item
-        for i in _FLIGHTS_PAGE_INDEXES
-        if isinstance(inner[i], list)
-        for item in inner[i][0]
-    ]
+def _extract_flights_raw(inner: list[object]) -> list[Any]:
+    items: list[Any] = []
+    for i in _FLIGHTS_PAGE_INDEXES:
+        page = cast(list[Any], inner[i])
+        if not page:
+            continue
+        rows = cast(list[Any], page[0])
+        if rows:
+            items.extend(rows)
+    return items
 
 
 def _raise_for_http_status(response: requests.Response, url: str) -> None:
@@ -78,7 +82,7 @@ def _raise_for_http_status(response: requests.Response, url: str) -> None:
         raise ProviderDataError(f"HTTP {response.status_code} from {url}") from e
 
 
-def _parse_flights(flights_raw: list) -> list[FlightResult]:
+def _parse_flights(flights_raw: list[Any]) -> list[FlightResult]:
     flights: list[FlightResult] = []
     for row in flights_raw:
         try:
@@ -228,7 +232,7 @@ class GoogleFlightsProvider(BaseProvider):
         currency: str,
         proxy_url: str,
         session: AsyncSession,
-    ) -> list[dict] | None:
+    ) -> list[dict[str, Any]] | None:
         selected = outbound[: self._rt_expand_top_n]
 
         async def expand(out: FlightResult) -> list[FlightResult]:
@@ -269,7 +273,7 @@ class GoogleFlightsProvider(BaseProvider):
         proxy_url: str | None = None,
         session: AsyncSession | None = None,
         return_date: str | None = None,
-    ) -> list[dict] | None:
+    ) -> list[dict[str, Any]] | None:
         """Search flights for one origin-destination-date combination.
 
         Args:

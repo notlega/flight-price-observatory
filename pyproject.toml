@@ -47,7 +47,9 @@ fail_under = 80
 
 [tool.basedpyright]
 pythonVersion = "3.14"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
 useLibraryCodeForTypes = true
+include = ["collector", "cli", "scripts"]
 exclude = ["htmlcov", "storage", ".venv"]
+stubPath = "stubs"
 

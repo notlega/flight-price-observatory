@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import Any, cast
-
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,7 +19,6 @@ from collector.providers.google_flights.provider import (
     GoogleFlightsProvider,
     _parse_flights,
 )
-
 from tests.libs.fakes import FakeResponse, FakeSession, FakeSessionFactory
 
 SIN = Airport["SIN"]
@@ -235,11 +233,9 @@ async def test_search_owned_session_is_closed():
             "collector.providers.google_flights.provider.parse_first_wrb_payload",
             return_value=None,
         ),
+        pytest.raises(ProviderBlockedError),
     ):
-        with pytest.raises(ProviderBlockedError):
-            await _provider().search(
-                SIN, KUL, "2026-12-01", proxy_url=PROXY, session=None
-            )
+        await _provider().search(SIN, KUL, "2026-12-01", proxy_url=PROXY, session=None)
 
     assert len(factory.created) == 1
     assert factory.created[0].closed
@@ -247,12 +243,14 @@ async def test_search_owned_session_is_closed():
 
 async def test_search_raises_blocked_on_stub_payload():
     session = FakeSession(response=FakeResponse(status_code=200, text="stub"))
-    with patch(
-        "collector.providers.google_flights.provider.parse_first_wrb_payload",
-        return_value=None,
+    with (
+        patch(
+            "collector.providers.google_flights.provider.parse_first_wrb_payload",
+            return_value=None,
+        ),
+        pytest.raises(ProviderBlockedError),
     ):
-        with pytest.raises(ProviderBlockedError):
-            await _search(session)
+        await _search(session)
 
 
 async def test_search_returns_none_when_large_body_has_no_payload():
@@ -499,17 +497,17 @@ async def test_search_round_trip_raises_when_all_expands_fail():
             "collector.providers.google_flights.provider.parse_flight_row",
             side_effect=lambda row: make_flight(row),
         ),
+        pytest.raises(ProviderRateLimitedError),
     ):
-        with pytest.raises(ProviderRateLimitedError):
-            await _provider(rt_expand_top_n=3).search(
-                SIN,
-                KUL,
-                "2026-12-01",
-                currency="SGD",
-                proxy_url=PROXY,
-                session=cast(Any, session),
-                return_date="2026-12-08",
-            )
+        await _provider(rt_expand_top_n=3).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
 
     assert session.post.await_count == 4
 
@@ -545,17 +543,17 @@ async def test_search_round_trip_raises_when_empty_inbound_and_error_mixed():
             "collector.providers.google_flights.provider.parse_flight_row",
             side_effect=lambda row: make_flight(row),
         ),
+        pytest.raises(ProviderBlockedError),
     ):
-        with pytest.raises(ProviderBlockedError):
-            await _provider(rt_expand_top_n=2).search(
-                SIN,
-                KUL,
-                "2026-12-01",
-                currency="SGD",
-                proxy_url=PROXY,
-                session=cast(Any, session),
-                return_date="2026-12-08",
-            )
+        await _provider(rt_expand_top_n=2).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
 
     assert session.post.await_count == 3
 
@@ -582,17 +580,17 @@ async def test_search_round_trip_returns_none_when_all_expands_empty():
             "collector.providers.google_flights.provider.parse_flight_row",
             side_effect=lambda row: make_flight(row),
         ),
+        pytest.raises(ProviderBlockedError),
     ):
-        with pytest.raises(ProviderBlockedError):
-            await _provider(rt_expand_top_n=2).search(
-                SIN,
-                KUL,
-                "2026-12-01",
-                currency="SGD",
-                proxy_url=PROXY,
-                session=cast(Any, session),
-                return_date="2026-12-08",
-            )
+        await _provider(rt_expand_top_n=2).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
 
     assert session.post.await_count == 3
 
@@ -632,17 +630,17 @@ async def test_search_round_trip_all_expands_fail_raises_same_error(error):
             "collector.providers.google_flights.provider.parse_flight_row",
             side_effect=lambda row: make_flight(row),
         ),
+        pytest.raises(type(error)),
     ):
-        with pytest.raises(type(error)):
-            await _provider(rt_expand_top_n=2).search(
-                SIN,
-                KUL,
-                "2026-12-01",
-                currency="SGD",
-                proxy_url=PROXY,
-                session=cast(Any, session),
-                return_date="2026-12-08",
-            )
+        await _provider(rt_expand_top_n=2).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
 
     assert session.post.await_count == 3
 
@@ -789,16 +787,16 @@ async def test_search_round_trip_single_expand_empty_returns_none():
             "collector.providers.google_flights.provider.parse_flight_row",
             side_effect=lambda row: make_flight(row),
         ),
+        pytest.raises(ProviderBlockedError),
     ):
-        with pytest.raises(ProviderBlockedError):
-            await _provider(rt_expand_top_n=1).search(
-                SIN,
-                KUL,
-                "2026-12-01",
-                currency="SGD",
-                proxy_url=PROXY,
-                session=cast(Any, session),
-                return_date="2026-12-08",
-            )
+        await _provider(rt_expand_top_n=1).search(
+            SIN,
+            KUL,
+            "2026-12-01",
+            currency="SGD",
+            proxy_url=PROXY,
+            session=cast(Any, session),
+            return_date="2026-12-08",
+        )
 
     assert session.post.await_count == 2
