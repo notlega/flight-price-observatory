@@ -6,7 +6,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from curl_cffi.requests import AsyncSession
 from fli.models import Airport
@@ -26,6 +26,7 @@ from collector.errors import (
     ProviderRateLimitedError,
     ProviderTimeoutError,
 )
+from collector.models.flight_result import FlightResultDict
 from collector.models.flight_type import FlightType
 from collector.models.proxy import ProxyInfo
 from collector.providers.base import BaseProvider
@@ -102,7 +103,7 @@ def _format_duration(seconds: float) -> str:
 class AttemptResult(NamedTuple):
     """Outcome of one provider search attempt."""
 
-    flights: list[dict[str, Any]] | None
+    flights: list[FlightResultDict] | None
     error_type: str | None
     proxy_info: ProxyInfo | None
     stubbed: bool = False
@@ -247,7 +248,7 @@ class BulkSearchPipeline:
         self,
         task: SearchTask,
         *,
-        flights: list[dict[str, Any]] | None,
+        flights: list[FlightResultDict] | None,
         error_type: str | None,
         retries: int,
         success: bool,

@@ -6,11 +6,12 @@ import logging
 import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple, cast
 
 import aiosqlite
 
 from collector.errors import ErrorType, RepositoryStateError
+from collector.models.flight_result import FlightResultDict, SearchResultRow
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +255,7 @@ class SearchRepository:
         flight_type: str,
         origin: str,
         destination: str,
-        flights: list[dict[str, Any]] | None,
+        flights: list[FlightResultDict] | None,
         error_type: str | None,
         retries: int,
         success: bool,
@@ -364,7 +365,7 @@ class SearchRepository:
         rows = await cursor.fetchall()
         return [(r[0], r[1]) for r in rows]
 
-    async def _iter_successful(self, raw: bool) -> AsyncIterator[dict[str, Any]]:
+    async def _iter_successful(self, raw: bool) -> AsyncIterator[SearchResultRow]:
         """Yield every successful row, parsing ``flights`` unless ``raw``."""
         cursor = await self._connection.execute(
             "SELECT route, dep_date, return_date, flight_type, origin, "
@@ -374,7 +375,7 @@ class SearchRepository:
         async for row in cursor:
             raw_flights = row[6]
             if raw:
-                flights: Any = raw_flights or "[]"
+                flights: list[FlightResultDict] | str = raw_flights or "[]"
             else:
                 flights = json.loads(raw_flights) if raw_flights else []
             yield {
@@ -388,12 +389,12 @@ class SearchRepository:
                 "searched_at": row[7],
             }
 
-    async def iter_successful(self) -> AsyncIterator[dict[str, Any]]:
+    async def iter_successful(self) -> AsyncIterator[SearchResultRow]:
         """Yield successful rows with ``flights`` parsed to Python objects."""
         async for row in self._iter_successful(raw=False):
             yield row
 
-    async def iter_successful_raw(self) -> AsyncIterator[dict[str, Any]]:
+    async def iter_successful_raw(self) -> AsyncIterator[SearchResultRow]:
         """Yield successful rows with ``flights`` as the stored JSON string."""
         async for row in self._iter_successful(raw=True):
             yield row

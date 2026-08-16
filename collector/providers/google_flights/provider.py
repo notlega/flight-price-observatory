@@ -30,6 +30,7 @@ from collector.errors import (
     ProviderRateLimitedError,
     ProviderTimeoutError,
 )
+from collector.models.flight_result import FlightResultDict
 from collector.providers.base import BaseProvider
 from collector.routes import RouteCatalog
 
@@ -245,7 +246,7 @@ class GoogleFlightsProvider(BaseProvider):
         currency: str,
         proxy_url: str,
         session: AsyncSession,
-    ) -> list[dict[str, Any]] | None:
+    ) -> list[FlightResultDict] | None:
         """Expand the top outbound options into merged round-trip results."""
         selected = outbound[: self._rt_expand_top_n]
 
@@ -276,7 +277,7 @@ class GoogleFlightsProvider(BaseProvider):
             if first_error is not None:
                 raise first_error
             return None
-        return [c.model_dump(mode="json") for c in combos]
+        return cast(list[FlightResultDict], [c.model_dump(mode="json") for c in combos])
 
     async def search(
         self,
@@ -287,7 +288,7 @@ class GoogleFlightsProvider(BaseProvider):
         proxy_url: str | None = None,
         session: AsyncSession | None = None,
         return_date: str | None = None,
-    ) -> list[dict[str, Any]] | None:
+    ) -> list[FlightResultDict] | None:
         """Search flights for one origin-destination-date combination.
 
         Args:
@@ -318,7 +319,10 @@ class GoogleFlightsProvider(BaseProvider):
                 return None
 
             if not return_date:
-                return [f.model_dump(mode="json") for f in outbound]
+                return cast(
+                    list[FlightResultDict],
+                    [f.model_dump(mode="json") for f in outbound],
+                )
 
             return await self._search_round_trip(
                 outbound, filters, currency, proxy_url, session

@@ -4,13 +4,19 @@ import argparse
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SILVER_DIR = "storage/silver"
 
 _ENV_KEYS = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET")
+
+
+class R2Client(Protocol):
+    """Duck-typed subset of the boto3 S3 client used for uploads."""
+
+    def upload_file(self, filename: str, bucket: str, key: str) -> None: ...
 
 
 def configure_parser(
@@ -27,7 +33,7 @@ def configure_parser(
     p.set_defaults(func=run)
 
 
-def _r2_client() -> Any:
+def _r2_client() -> R2Client:
     """Build an S3 client for R2, requiring the R2 env vars."""
     import boto3
 
@@ -44,7 +50,7 @@ def _r2_client() -> Any:
 
 
 def _upload_files(
-    client: Any, input_dir: str, bucket: str, prefix: str = "silver"
+    client: R2Client, input_dir: str, bucket: str, prefix: str = "silver"
 ) -> int:
     """Upload every Parquet file under ``input_dir``; return the count."""
     count = 0

@@ -3,8 +3,8 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any
 
+from collector.models.flight_result import SearchResultRow
 from collector.repository import SearchRepository
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ def default_output_path() -> str:
     return f"{DEFAULT_RAW_DIR}/search_{ts}.jsonl"
 
 
-def _jsonl_row(row: dict[str, Any]) -> str:
+def _jsonl_row(row: SearchResultRow) -> str:
     """Serialise one DB row as a JSONL line, splicing flights unescaped."""
     head = json.dumps(
         {
