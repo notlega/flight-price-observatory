@@ -10,6 +10,7 @@ from collector.convert import convert
 def configure_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # type: ignore[reportPrivateUsage]
 ) -> None:
+    """Register the ``convert`` subcommand on ``subparsers``."""
     p = subparsers.add_parser("convert", help="Export SQLite state to JSONL")
     p.add_argument(
         "db",
@@ -28,5 +29,6 @@ def configure_parser(
 
 
 def run(args: argparse.Namespace) -> None:
+    """Run the conversion and print the output path."""
     output = asyncio.run(convert(args.db, args.output))
     print(f"Output: {output}")

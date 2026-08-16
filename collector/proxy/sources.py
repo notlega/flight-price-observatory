@@ -15,6 +15,7 @@ REFILL_MAX_PER_SOURCE = 750
 
 
 def build_sources() -> list[tuple[str, str]]:
+    """Build the protocol/URL source list, prioritised by expected yield."""
     gh = "https://raw.githubusercontent.com/"
     js = "https://cdn.jsdelivr.net/gh/"
     sources: list[tuple[str, str]] = [
@@ -95,6 +96,7 @@ _PROTOCOL_PREFIX: dict[str, str] = {
 
 
 def normalise_url(protocol: str, raw: str) -> str | None:
+    """Normalise a proxy address to ``scheme://host:port``, else None."""
     raw = raw.strip()
     if "://" in raw:
         scheme, rest = raw.split("://", 1)
@@ -141,6 +143,7 @@ def normalise_url(protocol: str, raw: str) -> str | None:
 async def parse_source(
     protocol: str, url: str, client: httpx.AsyncClient
 ) -> list[ProxyInfo]:
+    """Fetch and parse one proxy source into ProxyInfo entries."""
     try:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -164,6 +167,7 @@ async def parse_source(
 
 
 async def parse_all_sources(max_per_source: int = 0) -> list[ProxyInfo]:
+    """Fetch every source concurrently, deduplicating by URL."""
     async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT) as client:
         results = await asyncio.gather(
             *[parse_source(proto, url, client) for proto, url in PROXY_SOURCES],

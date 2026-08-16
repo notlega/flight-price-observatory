@@ -17,6 +17,7 @@ class ProgressLogger:
         step_pct: int = 5,
         level: int = logging.INFO,
     ):
+        """Create logger that logs at fixed ``step_pct`` intervals."""
         self._logger = logger
         self._step_pct = step_pct
         self._level = level

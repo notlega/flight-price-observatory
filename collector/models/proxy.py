@@ -20,6 +20,8 @@ class ProxyInfoDict(TypedDict):
 
 @dataclass(slots=True)
 class ProxyInfo:
+    """One proxy pool entry with quality and failure-tracking fields."""
+
     url: str
     protocol: str
     quality_score: float = 1.0
@@ -31,6 +33,7 @@ class ProxyInfo:
     source: str = ""
 
     def to_dict(self) -> ProxyInfoDict:
+        """Serialize to a cache-writable dictionary."""
         return {
             "url": self.url,
             "protocol": self.protocol,
@@ -45,6 +48,7 @@ class ProxyInfo:
 
     @staticmethod
     def from_dict(data: ProxyInfoDict) -> ProxyInfo:
+        """Reconstruct a ProxyInfo from a serialised dictionary."""
         return ProxyInfo(
             url=data["url"],
             protocol=data["protocol"],

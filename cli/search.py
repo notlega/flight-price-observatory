@@ -18,6 +18,7 @@ from collector.errors import RepositoryStateError
 def configure_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # type: ignore[reportPrivateUsage]
 ) -> None:
+    """Register the ``search`` subcommand on ``subparsers``."""
     p = subparsers.add_parser("search", help="Bulk flight search")
     p.add_argument(
         "--start",
@@ -60,10 +61,12 @@ def configure_parser(
 
 
 def _ahead_days(end: date) -> int:
+    """Return days from today to ``end``, floored at zero."""
     return max((end - date.today()).days, 0)
 
 
 def run(args: argparse.Namespace) -> None:
+    """Run the search subcommand, exiting non-zero on repository state errors."""
     try:
         asyncio.run(_async_run(args))
     except RepositoryStateError as e:
@@ -72,6 +75,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 async def _async_run(args: argparse.Namespace) -> None:
+    """Build the search window and delegate to the collector manager."""
     start = args.start
     end = start + timedelta(days=args.max_days)
 

@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class CollectorManager:
+    """Wires registered providers into the bulk search pipeline."""
+
     def __init__(self, registry: ProviderRegistry) -> None:
+        """Create manager backed by ``registry``."""
         self._registry = registry
 
     async def run(

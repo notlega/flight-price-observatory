@@ -4,27 +4,27 @@ from enum import StrEnum
 
 
 class ProviderError(Exception):
-    pass
+    """Base class for all provider search failures."""
 
 
 class ProviderRateLimitedError(ProviderError):
-    pass
+    """The provider throttled the request (HTTP 429 or block page)."""
 
 
 class ProviderTimeoutError(ProviderError):
-    pass
+    """The provider request timed out."""
 
 
 class ProviderConnectionError(ProviderError):
-    pass
+    """The provider connection failed (network or proxy error)."""
 
 
 class ProviderDataError(ProviderError):
-    pass
+    """The provider returned unusable or invalid data."""
 
 
 class ProviderBlockedError(ProviderDataError):
-    pass
+    """The provider served a stub page indicating a blocked request."""
 
 
 class RepositoryStateError(Exception):
@@ -32,6 +32,8 @@ class RepositoryStateError(Exception):
 
 
 class ErrorType(StrEnum):
+    """Failure classification stored per failed search task."""
+
     NO_PROXY = "no_proxy"
     RATE_LIMITED = "429"
     TIMEOUT = "timeout"

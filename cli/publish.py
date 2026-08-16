@@ -16,6 +16,7 @@ _ENV_KEYS = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BU
 def configure_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # type: ignore[reportPrivateUsage]
 ) -> None:
+    """Register the ``publish`` subcommand on ``subparsers``."""
     p = subparsers.add_parser("publish", help="Upload silver Parquet to R2")
     p.add_argument(
         "--input",
@@ -27,6 +28,7 @@ def configure_parser(
 
 
 def _r2_client() -> Any:
+    """Build an S3 client for R2, requiring the R2 env vars."""
     import boto3
 
     missing = [k for k in _ENV_KEYS if not os.environ.get(k)]
@@ -44,6 +46,7 @@ def _r2_client() -> Any:
 def _upload_files(
     client: Any, input_dir: str, bucket: str, prefix: str = "silver"
 ) -> int:
+    """Upload every Parquet file under ``input_dir``; return the count."""
     count = 0
     for path in sorted(Path(input_dir).rglob("*.parquet")):
         key = f"{prefix}/{path.relative_to(input_dir).as_posix()}"
@@ -53,6 +56,7 @@ def _upload_files(
 
 
 def run(args: argparse.Namespace) -> None:
+    """Upload silver Parquet to R2 and report the uploaded count."""
     client = _r2_client()
     bucket = os.environ["R2_BUCKET"]
     count = _upload_files(client, args.input, bucket)

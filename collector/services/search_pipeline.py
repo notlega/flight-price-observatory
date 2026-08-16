@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, NamedTuple
@@ -57,10 +58,25 @@ class SearchTask:
 
 
 def _route_key(origin: Airport, dest: Airport) -> str:
+    """Return the stable DB key for an origin-destination pair."""
     return f"{origin.value}|{dest.value}"
 
 
+def _supported_routes(
+    provider: BaseProvider,
+) -> Iterator[tuple[Airport, Airport]]:
+    """Yield (origin, dest) airports for every one-way route the provider supports."""
+    for r in RouteCatalog.one_way_routes():
+        if (
+            provider.supports is not None
+            and (r.origin, r.dest) not in provider.supports
+        ):
+            continue
+        yield RouteCatalog.resolve(r.origin), RouteCatalog.resolve(r.dest)
+
+
 def _dates_between(start_date: date, end_date: date, today: date) -> list[date]:
+    """Return dates in [start_date, end_date] on or after ``today``."""
     return [
         current
         for current in (
@@ -72,6 +88,7 @@ def _dates_between(start_date: date, end_date: date, today: date) -> list[date]:
 
 
 def _format_duration(seconds: float) -> str:
+    """Format seconds as a compact ``HhMm``/``MmSs``/``Ss`` string."""
     seconds = int(seconds)
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
@@ -83,6 +100,8 @@ def _format_duration(seconds: float) -> str:
 
 
 class AttemptResult(NamedTuple):
+    """Outcome of one provider search attempt."""
+
     flights: list[dict[str, Any]] | None
     error_type: str | None
     proxy_info: ProxyInfo | None
@@ -90,6 +109,8 @@ class AttemptResult(NamedTuple):
 
 
 class BulkSearchPipeline:
+    """Orchestrate bulk searches: task building, batched execution, retries."""
+
     def __init__(
         self,
         providers: list[BaseProvider],
@@ -98,6 +119,7 @@ class BulkSearchPipeline:
         db_path: str = DEFAULT_DB_PATH,
         currency: str = DEFAULT_CURRENCY,
     ):
+        """Create pipeline with given providers, rate, concurrency, and store."""
         self.providers = providers
         self.rotator = ProxyRotator()
         self.rate_limiter = RateLimiter(max_rate=rate)
@@ -117,6 +139,7 @@ class BulkSearchPipeline:
         return_date: str | None,
         session: AsyncSession,
     ) -> AttemptResult:
+        """Run one search attempt, mapping provider errors to result types."""
         proxy_info = await self.rotator.get_proxy()
         if proxy_info is None:
             await asyncio.sleep(_NO_PROXY_DELAY)
@@ -169,6 +192,7 @@ class BulkSearchPipeline:
         session: AsyncSession,
         retry_round: int = 0,
     ) -> None:
+        """Retry ``task`` up to ``_MAX_ATTEMPTS`` times, then store the outcome."""
         searched_at = datetime.now(UTC).isoformat()
         error_type: str | None = None
 
@@ -229,6 +253,7 @@ class BulkSearchPipeline:
         success: bool,
         searched_at: str,
     ) -> None:
+        """Persist one search outcome, enforcing failed rows carry an error."""
         if not success and error_type is None:
             raise ValueError("failed result must carry an error_type")
         await self.repo.upsert(
@@ -251,6 +276,7 @@ class BulkSearchPipeline:
         retry_round: int,
         session: AsyncSession,
     ) -> None:
+        """Run ``task`` and trigger a mid-round proxy refresh when the pool shrinks."""
         try:
             await self._search_and_store(task, session, retry_round=retry_round)
         except Exception as e:
@@ -283,6 +309,7 @@ class BulkSearchPipeline:
         desc: str,
         retry_round: int = 0,
     ) -> None:
+        """Process ``tasks`` with concurrent workers, logging step progress."""
         total = len(tasks)
         queue: asyncio.Queue[SearchTask] = asyncio.Queue()
         for task in tasks:
@@ -333,6 +360,7 @@ class BulkSearchPipeline:
         task: SearchTask,
         retry_round: int,
     ) -> None:
+        """Persist an unexpected task failure as an OTHER error."""
         try:
             await self._store_result(
                 task,
@@ -353,19 +381,17 @@ class BulkSearchPipeline:
     async def _get_provider_map(
         self,
     ) -> dict[str, tuple[BaseProvider, Airport, Airport]]:
+        """Map route key to the provider that covers it."""
         m: dict[str, tuple[BaseProvider, Airport, Airport]] = {}
         for p in self.providers:
-            for r in RouteCatalog.one_way_routes():
-                if p.supports is not None and (r.origin, r.dest) not in p.supports:
-                    continue
-                origin = RouteCatalog.resolve(r.origin)
-                dest = RouteCatalog.resolve(r.dest)
+            for origin, dest in _supported_routes(p):
                 m[_route_key(origin, dest)] = (p, origin, dest)
         return m
 
     async def _retry_loop(
         self, rounds: int = 3, retry_all_failures: bool = False
     ) -> None:
+        """Retry failed tasks over ``rounds`` passes, refreshing proxies between."""
         provider_map = await self._get_provider_map()
         since = date.today().isoformat()
         for rnd in range(1, rounds + 1):
@@ -426,10 +452,12 @@ class BulkSearchPipeline:
                 )
 
     async def _log_counts(self, label: str) -> None:
+        """Log success/failure totals under ``label``."""
         success, failed = await self.repo.count_status()
         logger.info("%s: %d success, %d failed", label, success, failed)
 
     async def _log_failure_breakdown(self) -> None:
+        """Log failed-task counts grouped by error type."""
         by_error = await self.repo.count_by_error()
         if by_error:
             logger.warning("Failed breakdown: %s", dict(by_error))
@@ -439,6 +467,7 @@ class BulkSearchPipeline:
         start_date: date,
         effective_end: date,
     ) -> tuple[list[SearchTask], list[SeedRow]]:
+        """Build search tasks and seed rows for the provider date window."""
         tasks: list[SearchTask] = []
         seed_rows: list[SeedRow] = []
         today = date.today()
@@ -476,14 +505,7 @@ class BulkSearchPipeline:
             )
 
         for provider in self.providers:
-            for r in RouteCatalog.one_way_routes():
-                if (
-                    provider.supports is not None
-                    and (r.origin, r.dest) not in provider.supports
-                ):
-                    continue
-                origin = RouteCatalog.resolve(r.origin)
-                dest = RouteCatalog.resolve(r.dest)
+            for origin, dest in _supported_routes(provider):
                 for current in _dates_between(start_date, effective_end, today):
                     emit(provider, origin, dest, current, None)
 

@@ -5,6 +5,7 @@ import logging
 
 
 def _configure_logging(verbose: bool) -> None:
+    """Configure root logging at debug or info, quieting noisy libraries."""
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -13,6 +14,7 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def main() -> None:
+    """Parse argv and dispatch to the chosen subcommand."""
     parser = argparse.ArgumentParser(
         description="Flight Price Observatory CLI",
     )

@@ -15,6 +15,7 @@ DEFAULT_SILVER_DIR = "storage/silver"
 def configure_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # type: ignore[reportPrivateUsage]
 ) -> None:
+    """Register the ``transform`` subcommand on ``subparsers``."""
     p = subparsers.add_parser("transform", help="Convert raw JSONL to Parquet")
     p.add_argument(
         "--input",
@@ -32,6 +33,7 @@ def configure_parser(
 
 
 def _latest_jsonl() -> str:
+    """Return the most recently modified search JSONL file path."""
     raw = Path(DEFAULT_RAW_DIR)
     candidates = sorted(
         raw.glob("search_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
@@ -42,10 +44,12 @@ def _latest_jsonl() -> str:
 
 
 def _sql_literal(value: str) -> str:
+    """Escape a value for safe interpolation into a SQL string literal."""
     return value.replace("'", "''")
 
 
 def run(args: argparse.Namespace) -> None:
+    """Convert the input JSONL to partitioned Parquet and print the output."""
     import duckdb
 
     input_path = args.input or _latest_jsonl()

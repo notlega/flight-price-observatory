@@ -17,6 +17,7 @@ MIN_CACHE_POOL = 50
 
 
 def load_cache() -> tuple[float, list[ProxyInfo]] | None:
+    """Load cached proxies with their timestamp, or None when unusable."""
     try:
         with open(PROXY_CACHE_PATH) as f:
             data = json.load(f)
@@ -30,6 +31,7 @@ def load_cache() -> tuple[float, list[ProxyInfo]] | None:
 
 
 def save_cache(proxies: list[ProxyInfo]) -> None:
+    """Atomically write ``proxies`` to the cache file via a temp file."""
     Path(PROXY_CACHE_PATH).parent.mkdir(parents=True, exist_ok=True)
     tmp = f"{PROXY_CACHE_PATH}.tmp"
     data = {

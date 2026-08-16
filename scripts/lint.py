@@ -9,6 +9,7 @@ _TOOLS = ("ruff", "basedpyright")
 
 
 def _resolve(tool: str) -> str:
+    """Return the tool path, preferring the active venv and erroring otherwise."""
     venv_bin = Path(sys.prefix) / "bin" / tool
     if venv_bin.is_file():
         return str(venv_bin)
@@ -21,6 +22,7 @@ def _resolve(tool: str) -> str:
 
 
 def main() -> None:
+    """Run ruff format check, ruff lint, then basedpyright; exit non-zero on failure."""
     raise SystemExit(
         subprocess.call([_resolve("ruff"), "format", "--check", "."])
         or subprocess.call([_resolve("ruff"), "check", "."])

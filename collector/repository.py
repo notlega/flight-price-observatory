@@ -85,7 +85,10 @@ _REQUIRED_COLUMNS = frozenset(
 
 
 class SearchRepository:
+    """SQLite search result store with async batching and retry tracking."""
+
     def __init__(self, db_path: str) -> None:
+        """Create repository targeting ``db_path``; connection opens lazily."""
         self._db_path = db_path
         self._conn: aiosqlite.Connection | None = None
         self._queue: asyncio.Queue[_WriteItem] | None = None
@@ -95,12 +98,14 @@ class SearchRepository:
 
     @property
     def _connection(self) -> aiosqlite.Connection:
+        """Return the open connection, raising when not opened."""
         if self._conn is None:
             raise RuntimeError("repository connection not open")
         return self._conn
 
     @property
     def _write_queue(self) -> asyncio.Queue[_WriteItem]:
+        """Return the writer queue, raising when the writer is not started."""
         if self._queue is None:
             raise RuntimeError("writer queue not started")
         return self._queue
@@ -173,12 +178,14 @@ class SearchRepository:
             )
 
     async def _migrate(self) -> None:
+        """Drop legacy schemas missing the ``return_date`` column."""
         cursor = await self._connection.execute("PRAGMA table_info(search_results)")
         columns = {row[1] for row in await cursor.fetchall()}
         if columns and "return_date" not in columns:
             await self._connection.execute("DROP TABLE search_results")
 
     async def _writer_loop(self) -> None:
+        """Drain the write queue, committing in batches; stay alive on errors."""
         batch: list[tuple[object, ...]] = []
         while True:
             item = await self._write_queue.get()
@@ -206,6 +213,7 @@ class SearchRepository:
                 self._write_queue.task_done()
 
     async def _commit(self, batch: list[tuple[object, ...]]) -> None:
+        """Executemany-insert ``batch`` in one transaction."""
         if not batch:
             return
         async with self._write_lock:
@@ -224,7 +232,9 @@ class SearchRepository:
             raise self._writer_error
 
     async def close(self) -> None:
+        """Stop the writer and close the connection; safe when never opened."""
         if self._conn is None:
+            return
             return
         if self._queue is not None:
             self._queue.put_nowait(_STOP)
@@ -271,6 +281,7 @@ class SearchRepository:
         )
 
     async def insert_ignore_all(self, tasks: list[SeedRow]) -> None:
+        """Bulk-insert ``tasks`` as placeholder rows, ignoring existing keys."""
         sql = (
             "INSERT OR IGNORE INTO search_results "
             "(route, dep_date, return_date, flight_type, origin, destination, "
@@ -326,6 +337,7 @@ class SearchRepository:
         return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     async def count_status(self) -> tuple[int, int]:
+        """Return (success, failed) row counts."""
         cursor = await self._connection.execute(
             "SELECT "
             "COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0), "
@@ -336,12 +348,15 @@ class SearchRepository:
         return (row[0], row[1]) if row else (0, 0)
 
     async def count_successful(self) -> int:
+        """Return number of successful rows."""
         return (await self.count_status())[0]
 
     async def count_failed(self) -> int:
+        """Return number of failed rows."""
         return (await self.count_status())[1]
 
     async def count_by_error(self) -> list[tuple[str, int]]:
+        """Return (error_type, count) pairs for failed rows, grouped by error."""
         cursor = await self._connection.execute(
             "SELECT error_type, COUNT(*) FROM search_results "
             "WHERE success = 0 GROUP BY error_type"
@@ -350,16 +365,18 @@ class SearchRepository:
         return [(r[0], r[1]) for r in rows]
 
     async def _iter_successful(self, raw: bool) -> AsyncIterator[dict[str, Any]]:
+        """Yield every successful row, parsing ``flights`` unless ``raw``."""
         cursor = await self._connection.execute(
             "SELECT route, dep_date, return_date, flight_type, origin, "
             "destination, flights, searched_at "
             "FROM search_results WHERE success = 1 ORDER BY route, dep_date"
         )
         async for row in cursor:
-            flights = row[6]
-            flights: Any = (
-                flights or "[]" if raw else json.loads(flights) if flights else []
-            )
+            raw_flights = row[6]
+            if raw:
+                flights: Any = raw_flights or "[]"
+            else:
+                flights = json.loads(raw_flights) if raw_flights else []
             yield {
                 "route": row[0],
                 "dep_date": row[1],
@@ -372,14 +389,17 @@ class SearchRepository:
             }
 
     async def iter_successful(self) -> AsyncIterator[dict[str, Any]]:
+        """Yield successful rows with ``flights`` parsed to Python objects."""
         async for row in self._iter_successful(raw=False):
             yield row
 
     async def iter_successful_raw(self) -> AsyncIterator[dict[str, Any]]:
+        """Yield successful rows with ``flights`` as the stored JSON string."""
         async for row in self._iter_successful(raw=True):
             yield row
 
     async def delete_db(self) -> None:
+        """Close the repository and remove the database file plus WAL/SHM."""
         await self.close()
         for path in (
             Path(self._db_path),

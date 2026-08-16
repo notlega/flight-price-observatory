@@ -14,6 +14,7 @@ _EXTRA_AIRPORTS = {
 
 
 def _extend_airport_enum(cls: type[Airport], members: dict[str, str]) -> None:
+    """Add ``members`` to the Airport enum, skipping codes that already exist."""
     for name, value in members.items():
         if name in cls._member_map_:  # type: ignore[reportPrivateUsage]
             continue

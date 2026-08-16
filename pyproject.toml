@@ -51,7 +51,7 @@ fail_under = 80
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
 useLibraryCodeForTypes = true
-include = ["collector", "cli", "scripts"]
-exclude = ["htmlcov", "storage", ".venv"]
+include = ["."]
+exclude = ["htmlcov", "storage", ".venv", "tests", "stubs"]
 stubPath = "stubs"
 

@@ -42,6 +42,7 @@ _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
 def _valid_ip(candidate: str) -> bool:
+    """Return True when ``candidate`` parses as a valid IP address."""
     try:
         ipaddress.ip_address(candidate)
         return True
@@ -50,6 +51,7 @@ def _valid_ip(candidate: str) -> bool:
 
 
 def extract_ip(text: str) -> str | None:
+    """Extract the first IP literal from a JSON or plain-text echo response."""
     try:
         data: Any = json.loads(text)
         if isinstance(data, dict):
@@ -69,6 +71,7 @@ def extract_ip(text: str) -> str | None:
 
 
 async def fetch_real_ip() -> str:
+    """Return the caller's public IP (for transparency checks), else empty."""
     try:
         async with AsyncSession() as session:
             r = await session.get("https://api.ipify.org", timeout=_IPIFY_TIMEOUT)
@@ -80,6 +83,7 @@ async def fetch_real_ip() -> str:
 
 
 def count_by_source(proxies: list[ProxyInfo]) -> dict[str, int]:
+    """Count ``proxies`` grouped by source name."""
     counts: dict[str, int] = {}
     for p in proxies:
         counts[p.source] = counts.get(p.source, 0) + 1
@@ -87,6 +91,7 @@ def count_by_source(proxies: list[ProxyInfo]) -> dict[str, int]:
 
 
 def _log_probe_status(proxy_url: str, url: str, status: int) -> None:
+    """Log a rejected probe with a human-readable status kind."""
     kind = {
         407: "auth",
         403: "blocked",
@@ -102,6 +107,7 @@ async def probe_url(
     timeout: float,
     real_ip: str = "",
 ) -> float | None:
+    """Probe one echo URL via ``proxy_url``; return latency ms or None if bad."""
     t0 = time.monotonic()
     try:
         r = await session.get(
@@ -140,6 +146,7 @@ async def test_http_echo(
     timeout: float = _HTTP_ECHO_TIMEOUT,
     real_ip: str = "",
 ) -> float:
+    """Echo-probe all test URLs; return median latency, 0.0 when <2 succeed."""
     results = await asyncio.gather(
         *[probe_url(proxy_url, u, session, timeout, real_ip) for u in _TEST_ECHO_URLS],
         return_exceptions=True,
@@ -152,6 +159,7 @@ async def test_http_echo(
 
 
 async def tcp_alive(url: str, timeout: float = _TCP_TIMEOUT) -> bool:
+    """Return True when a TCP connection to ``url`` succeeds within timeout."""
     try:
         hostport = url.split("://", 1)[1].rstrip("/")
         host, sep, port = hostport.rpartition(":")
@@ -170,6 +178,7 @@ async def tcp_alive(url: str, timeout: float = _TCP_TIMEOUT) -> bool:
 
 
 async def prefilter_tcp(proxies: list[ProxyInfo]) -> list[ProxyInfo]:
+    """Return ``proxies`` that survive a concurrent TCP connect check."""
     sem = asyncio.Semaphore(_TCP_FILTER_LIMIT)
 
     async def check(proxy: ProxyInfo) -> bool:
@@ -196,6 +205,7 @@ async def prefilter_tcp_until(
 async def validate_proxy(
     proxy: ProxyInfo, session: AsyncSession, real_ip: str = ""
 ) -> ProxyInfo | None:
+    """Score one proxy via echo probes; return None when it fails validation."""
     latency = await test_http_echo(proxy.url, session, real_ip=real_ip)
 
     if latency == 0.0:

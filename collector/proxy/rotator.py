@@ -28,11 +28,14 @@ _REFRESH_AWAIT_TIMEOUT = 60.0
 
 
 class ProxyRotator:
+    """Manage the proxy pool: weighted selection, refresh, and eviction."""
+
     def __init__(
         self,
         max_concurrent: int = 200,
         max_per_source: int = 2500,
     ):
+        """Create empty rotator; pool fills on the first refresh."""
         self._proxies: list[ProxyInfo] = []
         self._index = 0
         self._lock = asyncio.Lock()
@@ -54,6 +57,7 @@ class ProxyRotator:
     async def _validate(
         self, proxies: list[ProxyInfo], target: int | None = None
     ) -> list[ProxyInfo]:
+        """TCP-prefilter then HTTP-validate ``proxies``, returning scored results."""
         if not proxies:
             return []
 
@@ -134,6 +138,7 @@ class ProxyRotator:
         return valid
 
     async def _set_pool(self, proxies: list[ProxyInfo]) -> None:
+        """Replace the pool and recompute selection weights."""
         async with self._lock:
             self._proxies = proxies
             self._index = 0
@@ -142,6 +147,7 @@ class ProxyRotator:
             self._recompute_weights()
 
     async def _apply_valid(self, valid: list[ProxyInfo], total: int) -> None:
+        """Install ``valid`` proxies as the pool and persist the cache."""
         if not valid:
             logger.warning(
                 "Validation produced no working proxies; keeping existing pool "
@@ -158,6 +164,7 @@ class ProxyRotator:
         )
 
     def _recompute_weights(self, pool: list[ProxyInfo] | None = None) -> None:
+        """Rebuild cumulative quality-score weights for ``pool`` (default: active)."""
         pool = pool if pool is not None else self._proxies
         self._cum_weights = []
         total = 0.0
@@ -248,6 +255,7 @@ class ProxyRotator:
         return False
 
     def _pick(self) -> ProxyInfo | None:
+        """Return a weighted-random usable proxy, falling back to round-robin."""
         now = time.monotonic()
         if any(p.rate_limit_until > now for p in self._proxies):
             pool = [p for p in self._proxies if p.rate_limit_until <= now]
@@ -290,12 +298,14 @@ class ProxyRotator:
         return proxy
 
     async def _ensure_refresh_task(self) -> None:
+        """Start an auto-refresh task unless one is already running."""
         async with self._schedule_lock:
             if self._refresh_task is not None and not self._refresh_task.done():
                 return
             self._refresh_task = asyncio.create_task(self._auto_refresh())
 
     async def _auto_refresh(self) -> None:
+        """Refill an exhausted pool, escalating to a force-refetch on starvation."""
         try:
             now = time.monotonic()
             # Bypass the gap when the pool is still starved: a 5-minute cooldown
@@ -337,52 +347,49 @@ class ProxyRotator:
         finally:
             self._refresh_task = None
 
+    def _evict(self, proxy: ProxyInfo, blacklist_ttl: float) -> None:
+        """Remove ``proxy`` from the pool (when present) and blacklist its URL."""
+        with suppress(ValueError):
+            self._proxies.remove(proxy)
+        self._blacklist[proxy.url] = time.monotonic() + blacklist_ttl
+
     async def report_failure(self, proxy: ProxyInfo) -> None:
+        """Evict a dead proxy and park its URL for the dead-proxy TTL."""
         async with self._lock:
-            try:
-                self._proxies.remove(proxy)
-                logger.debug(
-                    "Removed dead proxy %s (%d remaining)",
-                    proxy.url,
-                    len(self._proxies),
-                )
-            except ValueError:
-                pass
-            self._blacklist[proxy.url] = time.monotonic() + _DEAD_BLACKLIST_TTL
+            self._evict(proxy, _DEAD_BLACKLIST_TTL)
+            logger.debug(
+                "Removed dead proxy %s (%d remaining)",
+                proxy.url,
+                len(self._proxies),
+            )
 
     async def report_stub(self, proxy: ProxyInfo) -> None:
+        """Count a stub response; evict after ``_MAX_STUB_EVICTIONS`` stubs."""
         async with self._lock:
             proxy.stub_count += 1
             if proxy.stub_count >= _MAX_STUB_EVICTIONS:
-                try:
-                    self._proxies.remove(proxy)
-                    logger.info(
-                        "Evicted proxy %s after %d stubs (%d remaining)",
-                        proxy.url,
-                        proxy.stub_count,
-                        len(self._proxies),
-                    )
-                except ValueError:
-                    pass
-                self._blacklist[proxy.url] = time.monotonic() + _EVICT_BLACKLIST_TTL
+                self._evict(proxy, _EVICT_BLACKLIST_TTL)
+                logger.info(
+                    "Evicted proxy %s after %d stubs (%d remaining)",
+                    proxy.url,
+                    proxy.stub_count,
+                    len(self._proxies),
+                )
 
     async def report_rate_limited(
         self, proxy: ProxyInfo, seconds: float = _RATE_LIMIT_COOLDOWN
     ):
+        """Count a 429; evict after ``_MAX_429_EVICTIONS`` else park for ``seconds``."""
         async with self._lock:
             proxy.rate_limited_count += 1
             if proxy.rate_limited_count >= _MAX_429_EVICTIONS:
-                try:
-                    self._proxies.remove(proxy)
-                    logger.info(
-                        "Evicted proxy %s after %d 429s (%d remaining)",
-                        proxy.url,
-                        proxy.rate_limited_count,
-                        len(self._proxies),
-                    )
-                except ValueError:
-                    pass
-                self._blacklist[proxy.url] = time.monotonic() + _EVICT_BLACKLIST_TTL
+                self._evict(proxy, _EVICT_BLACKLIST_TTL)
+                logger.info(
+                    "Evicted proxy %s after %d 429s (%d remaining)",
+                    proxy.url,
+                    proxy.rate_limited_count,
+                    len(self._proxies),
+                )
                 return
             proxy.rate_limit_until = time.monotonic() + seconds
             self._weight_pool_len = 0
@@ -395,13 +402,16 @@ class ProxyRotator:
             )
 
     def working_count(self) -> int:
+        """Return the number of proxies currently in the pool."""
         return len(self._proxies)
 
     def usable_count(self) -> int:
+        """Return the number of proxies not parked by rate limiting."""
         now = time.monotonic()
         return sum(1 for p in self._proxies if p.rate_limit_until <= now)
 
     def _active_blacklist(self) -> set[str]:
+        """Return non-expired blacklisted URLs, pruning expired entries."""
         now = time.monotonic()
         expired = [u for u, exp in self._blacklist.items() if exp <= now]
         for u in expired:

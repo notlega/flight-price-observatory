@@ -54,6 +54,7 @@ _BLOCK_MARKERS = ("captcha", "unusual traffic", "attention required", "access de
 
 
 def _extract_flights_raw(inner: list[object]) -> list[Any]:
+    """Pull raw flight rows out of the WRB payload page structure."""
     items: list[Any] = []
     for i in _FLIGHTS_PAGE_INDEXES:
         page = cast(list[Any], inner[i])
@@ -66,6 +67,7 @@ def _extract_flights_raw(inner: list[object]) -> list[Any]:
 
 
 def _raise_for_http_status(response: requests.Response, url: str) -> None:
+    """Map HTTP status/block markers to typed provider errors."""
     if response.status_code == 429:
         raise ProviderRateLimitedError(f"HTTP 429 from {url}")
     if response.status_code >= 500:
@@ -82,6 +84,7 @@ def _raise_for_http_status(response: requests.Response, url: str) -> None:
 
 
 def _parse_flights(flights_raw: list[Any]) -> list[FlightResult]:
+    """Parse raw rows into FlightResults, skipping unparseable rows."""
     flights: list[FlightResult] = []
     for row in flights_raw:
         try:
@@ -92,6 +95,7 @@ def _parse_flights(flights_raw: list[Any]) -> list[FlightResult]:
 
 
 def _search_context(filters: FlightSearchFilters) -> str:
+    """Return a short human-readable route/departure description."""
     seg = filters.flight_segments[0]
     dep = seg.departure_airport[0][0]
     arr = seg.arrival_airport[0][0]
@@ -101,9 +105,12 @@ def _search_context(filters: FlightSearchFilters) -> str:
 
 
 class GoogleFlightsProvider(BaseProvider):
+    """Google Flights provider speaking the fli wire protocol."""
+
     name = "google_flights"
 
     def __init__(self, rt_expand_top_n: int = 3) -> None:
+        """Create provider; initialises the airport enum once."""
         from collector._fli_airports import init
 
         init()
@@ -111,6 +118,7 @@ class GoogleFlightsProvider(BaseProvider):
 
     @property
     def supports(self) -> set[tuple[str, str]]:
+        """Return the one-way route codes this provider covers."""
         return {(route.origin, route.dest) for route in RouteCatalog.one_way_routes()}
 
     def _build_filters(
@@ -120,6 +128,7 @@ class GoogleFlightsProvider(BaseProvider):
         date_str: str,
         return_date: str | None,
     ) -> FlightSearchFilters:
+        """Build flight search filters for one-way or round-trip segments."""
         segments = [
             FlightSegment(
                 departure_airport=[[origin, 0]],
@@ -154,6 +163,7 @@ class GoogleFlightsProvider(BaseProvider):
         proxy_url: str,
         session: AsyncSession,
     ) -> list[FlightResult] | None:
+        """POST the shopping request and parse the WRB flight response."""
         encoded = filters.encode()
         url = with_locale_params(_SHOPPING_URL, currency, None, None)
 
@@ -216,6 +226,7 @@ class GoogleFlightsProvider(BaseProvider):
     def _merge_round_trip(
         outbound: FlightResult, inbound: FlightResult
     ) -> FlightResult:
+        """Combine outbound and inbound legs into one round-trip result."""
         total_price = (outbound.price or 0) + (inbound.price or 0)
         return outbound.model_copy(
             update={
@@ -235,6 +246,7 @@ class GoogleFlightsProvider(BaseProvider):
         proxy_url: str,
         session: AsyncSession,
     ) -> list[dict[str, Any]] | None:
+        """Expand the top outbound options into merged round-trip results."""
         selected = outbound[: self._rt_expand_top_n]
 
         async def expand(out: FlightResult) -> list[FlightResult]:

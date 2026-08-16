@@ -15,11 +15,13 @@ _BUFFER_FLUSH = 1000
 
 
 def default_output_path() -> str:
+    """Return a timestamped JSONL path under the raw output directory."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{DEFAULT_RAW_DIR}/search_{ts}.jsonl"
 
 
 def _jsonl_row(row: dict[str, Any]) -> str:
+    """Serialise one DB row as a JSONL line, splicing flights unescaped."""
     head = json.dumps(
         {
             k: row[k]
@@ -43,6 +45,7 @@ def _jsonl_row(row: dict[str, Any]) -> str:
 async def convert(
     db_path: str, output_path: str | None = None, delete: bool = False
 ) -> str:
+    """Export the DB to JSONL, optionally deleting the DB afterward."""
     if output_path is None:
         output_path = default_output_path()
 

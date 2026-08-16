@@ -8,11 +8,15 @@ from fli.models import Airport
 
 @dataclass(frozen=True)
 class Route:
+    """One origin-destination pair in the catalog."""
+
     origin: str
     dest: str
 
 
 class RouteCatalog:
+    """Static catalog of hub/destination codes and route builders."""
+
     HUB = "SIN"
     DESTINATIONS = (
         "KUL",
@@ -35,6 +39,7 @@ class RouteCatalog:
 
     @classmethod
     def one_way_routes(cls) -> list[Route]:
+        """Return all hub-to-destination routes in both directions."""
         routes: list[Route] = []
         for dest in cls.DESTINATIONS:
             routes.append(Route(cls.HUB, dest))
@@ -43,6 +48,7 @@ class RouteCatalog:
 
     @classmethod
     def round_trip_routes(cls) -> list[Route]:
+        """Return outbound-only hub routes for round-trip searches."""
         return [Route(cls.HUB, dest) for dest in cls.DESTINATIONS]
 
     iri_map: ClassVar[dict[str, Airport]] = {
@@ -51,4 +57,5 @@ class RouteCatalog:
 
     @classmethod
     def resolve(cls, code: str) -> Airport:
+        """Return the fli Airport enum member for ``code``."""
         return cls.iri_map[code]

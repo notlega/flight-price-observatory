@@ -15,7 +15,10 @@ _RATE_RECOVERY = 2.0
 
 
 class RateLimiter:
+    """Token-bucket limiter with adaptive rate and 429 backoff."""
+
     def __init__(self, max_rate: float = 8, min_rate: float = 0.5) -> None:
+        """Create limiter bounded by ``max_rate`` and ``min_rate`` requests/sec."""
         if max_rate <= 0:
             raise ValueError("max_rate must be > 0")
         if min_rate <= 0:
@@ -32,6 +35,7 @@ class RateLimiter:
         self._429_times: deque[float] = deque()
 
     async def acquire(self) -> None:
+        """Consume one token, sleeping until a slot is available."""
         async with self._lock:
             now = time.monotonic()
             elapsed = now - self.refill_at
@@ -50,6 +54,7 @@ class RateLimiter:
         await asyncio.sleep(delay)
 
     async def report_429(self) -> None:
+        """Record a 429 and back the rate off when the recent ratio is high."""
         async with self._lock:
             now = time.monotonic()
             self._429_times.append(now)
@@ -70,6 +75,7 @@ class RateLimiter:
                     )
 
     async def report_success(self) -> None:
+        """Record a clean request and recover the rate after a clean window."""
         async with self._lock:
             now = time.monotonic()
             cutoff = now - _RATE_RECOVERY_WINDOW
