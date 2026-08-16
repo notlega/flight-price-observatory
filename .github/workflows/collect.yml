@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      ANCHOR_DATE: 2026-08-19
+      ANCHOR_DATE: 2026-08-18
     steps:
       - uses: actions/checkout@v4
 
