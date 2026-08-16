@@ -143,7 +143,9 @@ class FakeRepo:
         self.purged_calls += 1
         return 0
 
-    async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
+    async def get_failed(
+        self, max_retries: int = 3, since: str | None = None
+    ) -> list[tuple[str, str, str, str]]:
         return list(self.failed)
 
     async def count_status(self) -> tuple[int, int]:

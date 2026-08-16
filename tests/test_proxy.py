@@ -701,6 +701,25 @@ async def test_rotator_returns_none_when_empty():
         assert await rot.get_proxy() is None
 
 
+async def test_apply_valid_empty_keeps_pool_and_cache():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url="http://a:1") for _ in range(3)])
+    with patch("collector.proxy.rotator.cache.save_cache") as save:
+        await rot._apply_valid([], 10)
+    assert rot.working_count() == 3
+    save.assert_not_called()
+
+
+async def test_apply_valid_swaps_pool_and_saves_cache():
+    rot = ProxyRotator()
+    await rot._set_pool([make_proxy(url="http://a:1")])
+    fresh = [make_proxy(url=f"http://n{i}:1") for i in range(2)]
+    with patch("collector.proxy.rotator.cache.save_cache") as save:
+        await rot._apply_valid(fresh, 10)
+    assert rot.working_count() == 2
+    save.assert_called_once_with(fresh)
+
+
 async def test_get_proxy_waits_for_refresh_when_empty():
     rot = ProxyRotator()
     proxy = make_proxy(url="http://a:1")

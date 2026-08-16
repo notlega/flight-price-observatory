@@ -91,6 +91,7 @@ class SearchRepository:
         self._queue: asyncio.Queue[_WriteItem] | None = None
         self._writer_task: asyncio.Task[None] | None = None
         self._write_lock = asyncio.Lock()
+        self._writer_error: Exception | None = None
 
     @property
     def _connection(self) -> aiosqlite.Connection:
@@ -108,11 +109,16 @@ class SearchRepository:
         """Open the database connection and start the writer loop."""
         db_dir = Path(self._db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
-        probe = sqlite3.connect(self._db_path)
         try:
-            probe.execute("SELECT 1")
-        finally:
-            probe.close()
+            probe = sqlite3.connect(self._db_path)
+            try:
+                probe.execute("SELECT 1")
+            finally:
+                probe.close()
+        except sqlite3.Error as e:
+            raise RepositoryStateError(
+                f"invalid database at {self._db_path}: {e}"
+            ) from e
         conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         self._conn = conn
         try:
@@ -176,20 +182,28 @@ class SearchRepository:
         batch: list[tuple[object, ...]] = []
         while True:
             item = await self._write_queue.get()
-            if item is _STOP:
-                await self._commit(batch)
-                self._write_queue.task_done()
-                return
-            if item is _FLUSH:
-                await self._commit(batch)
+            try:
+                if item is _STOP:
+                    await self._commit(batch)
+                    batch.clear()
+                    return
+                if item is _FLUSH:
+                    await self._commit(batch)
+                    batch.clear()
+                    continue
+                batch.append(cast(tuple[object, ...], item))
+                if len(batch) >= _WRITE_BATCH_SIZE:
+                    await self._commit(batch)
+                    batch.clear()
+            except Exception as e:
+                # Keep the writer alive so the queue drains and callers never
+                # hang in flush()/close(); surface the failure on the next
+                # sync point instead.
+                self._writer_error = e
+                logger.exception("Writer commit failed; dropping pending batch")
                 batch.clear()
+            finally:
                 self._write_queue.task_done()
-                continue
-            batch.append(cast(tuple[object, ...], item))
-            if len(batch) >= _WRITE_BATCH_SIZE:
-                await self._commit(batch)
-                batch.clear()
-            self._write_queue.task_done()
 
     async def _commit(self, batch: list[tuple[object, ...]]) -> None:
         if not batch:
@@ -206,6 +220,8 @@ class SearchRepository:
         # the queue would deadlock the writer.
         self._queue.put_nowait(_FLUSH)
         await self._write_queue.join()
+        if self._writer_error is not None:
+            raise self._writer_error
 
     async def close(self) -> None:
         if self._conn is None:
@@ -235,6 +251,8 @@ class SearchRepository:
         searched_at: str,
     ) -> None:
         """Queue a search result write, keyed by route and dates."""
+        if self._writer_error is not None:
+            raise self._writer_error
         flights_json = json.dumps(flights) if flights else None
         self._write_queue.put_nowait(
             (
@@ -277,29 +295,32 @@ class SearchRepository:
         return cursor.rowcount
 
     async def get_failed(
-        self, max_retries: int | None = 3
+        self, max_retries: int | None = 3, since: str | None = None
     ) -> list[tuple[str, str, str, str]]:
         """Return failed tasks retried at most ``max_retries`` attempts.
 
         ``retries`` stores cumulative attempts consumed (1-based), so a task
         that failed once per round carries ``retries = round * _MAX_ATTEMPTS``.
         A ``None`` ``max_retries`` fetches every retryable failure regardless
-        of how many attempts were already consumed.
+        of how many attempts were already consumed. Pass ``since`` (ISO date)
+        to skip departures before that date.
         """
         placeholders = ",".join("?" for _ in _RETRY_ERROR_TYPES)
+        since_clause = " AND dep_date >= ?" if since is not None else ""
+        since_params = () if since is None else (since,)
         if max_retries is None:
             cursor = await self._connection.execute(
                 "SELECT route, dep_date, return_date, flight_type "
                 f"FROM search_results WHERE success = 0 "
-                f"AND error_type IN ({placeholders})",
-                _RETRY_ERROR_TYPES,
+                f"AND error_type IN ({placeholders}){since_clause}",
+                (*_RETRY_ERROR_TYPES, *since_params),
             )
         else:
             cursor = await self._connection.execute(
                 "SELECT route, dep_date, return_date, flight_type "
                 f"FROM search_results WHERE success = 0 "
-                f"AND error_type IN ({placeholders}) AND retries <= ?",
-                (*_RETRY_ERROR_TYPES, max_retries),
+                f"AND error_type IN ({placeholders}){since_clause} AND retries <= ?",
+                (*_RETRY_ERROR_TYPES, *since_params, max_retries),
             )
         rows = await cursor.fetchall()
         return [(r[0], r[1], r[2], r[3]) for r in rows]

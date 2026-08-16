@@ -142,6 +142,12 @@ class ProxyRotator:
             self._recompute_weights()
 
     async def _apply_valid(self, valid: list[ProxyInfo], total: int) -> None:
+        if not valid:
+            logger.warning(
+                "Validation produced no working proxies; keeping existing pool "
+                "(cache not overwritten)"
+            )
+            return
         await self._set_pool(valid)
         cache.save_cache(valid)
         logger.info(

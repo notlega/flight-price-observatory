@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, NamedTuple
@@ -41,6 +42,7 @@ _PROGRESS_LOG_STEP_PCT = 5
 _MIN_POOL_BEFORE_RETRY = 20
 _NO_PROXY_DELAY = 0.5
 _STUB_BACKOFF_S = 30
+_MID_REFRESH_GAP = 300
 
 
 @dataclass(slots=True, kw_only=True)
@@ -107,6 +109,7 @@ class BulkSearchPipeline:
         self.currency = currency
         self.keep_db = keep_db
         self._mid_refresh = False
+        self._last_mid_refresh = float("-inf")
 
     async def _attempt_once(
         self,
@@ -266,8 +269,10 @@ class BulkSearchPipeline:
             retry_round > 0
             and self.rotator.working_count() < _MIN_POOL_BEFORE_RETRY
             and not self._mid_refresh
+            and time.monotonic() - self._last_mid_refresh > _MID_REFRESH_GAP
         ):
             self._mid_refresh = True
+            self._last_mid_refresh = time.monotonic()
             try:
                 await self.rotator.refresh(force=True)
             except Exception:
@@ -365,9 +370,11 @@ class BulkSearchPipeline:
         self, rounds: int = 3, retry_all_failures: bool = False
     ) -> None:
         provider_map = await self._get_provider_map()
+        since = date.today().isoformat()
         for rnd in range(1, rounds + 1):
             failed = await self.repo.get_failed(
-                max_retries=None if retry_all_failures else rnd * _MAX_ATTEMPTS
+                max_retries=None if retry_all_failures else rnd * _MAX_ATTEMPTS,
+                since=since,
             )
             if not failed:
                 logger.info("No failed tasks to retry")
@@ -541,6 +548,15 @@ class BulkSearchPipeline:
                 len(tasks),
                 len(self.providers),
             )
+
+            if not tasks:
+                logger.warning(
+                    "No tasks in window %s -> %s; nothing to search "
+                    "(is --start in the future?)",
+                    start_date,
+                    effective_end,
+                )
+                return
 
         proxy_task = asyncio.create_task(self.rotator.refresh())
         try:

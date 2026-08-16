@@ -558,7 +558,7 @@ async def test_retry_loop_escalates_max_retries_with_round():
     repo.failed = [("X|Y", "2000-01-01", "", "ONE_WAY")]
     calls: list[int] = []
 
-    async def recording_get_failed(max_retries=3):
+    async def recording_get_failed(max_retries=3, since=None):
         calls.append(max_retries)
         return repo.failed
 
@@ -702,7 +702,8 @@ async def test_run_max_days_ahead_negative_builds_no_tasks(tmp_path):
         await pipeline.run(date.today(), date.today(), max_days_ahead=-1)
     assert repo.inserted == []
     assert repo.upserts == []
-    convert.assert_awaited_once()
+    assert rotator.refreshes == []
+    convert.assert_not_awaited()
 
 
 async def test_retry_loop_stops_when_nothing_failed():
@@ -760,7 +761,8 @@ async def test_run_empty_task_window_noop(tmp_path, start, end):
         await pipeline.run(start, end, max_days_ahead=330)
     assert repo.inserted == []
     assert repo.upserts == []
-    convert.assert_awaited_once()
+    assert rotator.refreshes == []
+    convert.assert_not_awaited()
 
 
 async def test_run_preflight_refreshes_when_no_proxies(tmp_path):
@@ -869,9 +871,11 @@ async def test_run_continue_skips_seeding_and_retries_failures(tmp_path):
     repo = FakeRepo()
     repo.failed = [(ROUTE, "2099-01-01", "", "ONE_WAY")]
     max_retries_calls: list[int | None] = []
+    since_calls: list[str] = []
 
-    async def recording_get_failed(max_retries=3):
+    async def recording_get_failed(max_retries=3, since=None):
         max_retries_calls.append(max_retries)
+        since_calls.append(since)
         return repo.failed
 
     repo.get_failed = recording_get_failed  # type: ignore[method-assign]
@@ -893,6 +897,7 @@ async def test_run_continue_skips_seeding_and_retries_failures(tmp_path):
     assert repo.inserted == []
     assert repo.purged_calls == 0
     assert max_retries_calls and all(m is None for m in max_retries_calls)
+    assert since_calls and all(s == date.today().isoformat() for s in since_calls)
     assert repo.upserts
     assert all(r["success"] is True for r in repo.upserts)
     convert.assert_awaited_once_with(
@@ -900,6 +905,30 @@ async def test_run_continue_skips_seeding_and_retries_failures(tmp_path):
         ANY,
         delete=True,
     )
+
+
+async def test_run_batch_mid_round_refresh_respects_cooldown():
+    provider = FakeProvider(script=[make_flights(100)] * 2)
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    tasks = [
+        SearchTask(
+            provider=provider,
+            origin=SIN,
+            dest=KUL,
+            departure="2099-01-01",
+            return_date=None,
+            flight_type=FlightType.ONE_WAY.value,
+        )
+        for _ in range(2)
+    ]
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+    ):
+        await pipeline._run_batch(tasks, "Retry round 1/3", retry_round=1)
+        await pipeline._run_batch(tasks, "Retry round 1/3", retry_round=1)
+    assert len(rotator.refreshes) == 1
 
 
 def test_ahead_days_from_today_matches_window():

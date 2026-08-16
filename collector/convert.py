@@ -51,7 +51,14 @@ async def convert(
 
     total = await repo.count_successful()
     if total == 0:
-        logger.warning("No successful results to convert")
+        failed = await repo.count_failed()
+        if failed:
+            logger.warning(
+                "No successful results to convert (%d failed tasks, none retryable)",
+                failed,
+            )
+        else:
+            logger.warning("No successful results to convert")
         if delete:
             await repo.delete_db()
         else:
@@ -60,15 +67,20 @@ async def convert(
 
     written = 0
     buffer: list[str] = []
-    with open(output_path, "w") as f:
-        async for row in repo.iter_successful_raw():
-            buffer.append(_jsonl_row(row))
-            written += 1
-            if len(buffer) >= _BUFFER_FLUSH:
+    try:
+        with open(output_path, "w") as f:
+            async for row in repo.iter_successful_raw():
+                buffer.append(_jsonl_row(row))
+                written += 1
+                if len(buffer) >= _BUFFER_FLUSH:
+                    f.writelines(buffer)
+                    buffer.clear()
+            if buffer:
                 f.writelines(buffer)
-                buffer.clear()
-        if buffer:
-            f.writelines(buffer)
+    except Exception:
+        logger.exception("Failed writing %s; state database retained", output_path)
+        await repo.close()
+        raise
 
     logger.info("Wrote %d rows to %s", written, output_path)
 

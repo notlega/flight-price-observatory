@@ -1,5 +1,6 @@
 import json
 import os
+from unittest.mock import patch
 
 import pytest
 
@@ -83,6 +84,49 @@ async def test_convert_empty_db_delete_true_removes_state(tmp_path):
     out = str(tmp_path / "out.jsonl")
     await convert(db, out, delete=True)
     assert not os.path.exists(db)
+
+
+async def test_convert_no_success_with_failures_warns_and_keeps_detail(
+    tmp_path, caplog
+):
+    db = str(tmp_path / "state.db")
+    repo = SearchRepository(db)
+    await repo.open()
+    await repo.upsert(
+        route="SIN|KUL",
+        dep_date="2026-08-01",
+        return_date="",
+        flight_type="ONE_WAY",
+        origin="SIN",
+        destination="KUL",
+        flights=None,
+        error_type="other",
+        retries=9,
+        success=False,
+        searched_at="t",
+    )
+    await repo.flush()
+    await repo.close()
+
+    out = str(tmp_path / "out.jsonl")
+    with caplog.at_level("WARNING"):
+        await convert(db, out, delete=True)
+    assert "1 failed tasks, none retryable" in caplog.text
+    assert not os.path.exists(db)
+
+
+async def test_convert_write_error_retains_db_and_raises(seeded_db, tmp_path):
+    out = str(tmp_path / "out.jsonl")
+
+    def failing_open(*args, **kwargs):
+        raise OSError("disk full")
+
+    with (
+        patch("builtins.open", side_effect=failing_open),
+        pytest.raises(OSError, match="disk full"),
+    ):
+        await convert(seeded_db, out, delete=True)
+    assert os.path.exists(seeded_db)
 
 
 @pytest.mark.parametrize("n", [999, 1000, 1001])

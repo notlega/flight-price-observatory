@@ -86,7 +86,7 @@ async def test_open_corrupt_db_file_raises(tmp_path):
     db = str(tmp_path / "not_a_file")
     (tmp_path / "not_a_file").mkdir()
     repo = SearchRepository(db)
-    with pytest.raises(sqlite3.DatabaseError):
+    with pytest.raises(RepositoryStateError, match="invalid database"):
         await repo.open()
 
 
@@ -284,6 +284,34 @@ async def test_require_existing_valid_populated_db_passes(tmp_path):
 
     checker = SearchRepository(str(path))
     await checker.require_existing()
+
+
+async def test_get_failed_since_filters_past_departures(repo):
+    await _upsert(repo, "r1", error_type="data", retries=3, success=False)
+    await _upsert(repo, "r2", error_type="data", retries=3, success=False)
+    await repo.flush()
+    await repo._connection.execute(
+        "UPDATE search_results SET dep_date = '2026-01-01' WHERE route = 'r1'"
+    )
+    await repo._connection.execute(
+        "UPDATE search_results SET dep_date = '2099-01-01' WHERE route = 'r2'"
+    )
+    await repo._connection.commit()
+
+    rows = await repo.get_failed(max_retries=3, since="2026-08-17")
+    assert [r[0] for r in rows] == ["r2"]
+
+
+async def test_writer_error_raised_on_flush_and_not_dropped(repo):
+    await _upsert(repo, "r1", flights=[{"p": 1}])
+    await repo.flush()
+    await repo._connection.close()
+    await _upsert(repo, "r2", flights=[{"p": 2}])
+    with pytest.raises(ValueError, match="no active connection"):
+        await repo.flush()
+    with pytest.raises(ValueError, match="no active connection"):
+        await _upsert(repo, "r3", flights=[{"p": 3}])
+    await repo.close()
 
 
 async def test_count_by_error(repo):

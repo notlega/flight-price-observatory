@@ -49,6 +49,18 @@ def test_fli_airport_patch_is_idempotent():
     assert Airport._member_map_["YIC"] is member
 
 
+def test_init_repairs_missing_oka_patch():
+    init()
+    saved = _fli_decoders._AIRPORT_BY_CODE.get("OKA")
+    _fli_decoders._AIRPORT_BY_CODE.pop("OKA", None)
+    try:
+        init()
+        assert _fli_decoders._AIRPORT_BY_CODE["OKA"] is Airport["NAH"]
+    finally:
+        if saved is not None:
+            _fli_decoders._AIRPORT_BY_CODE["OKA"] = saved
+
+
 def test_extend_airport_enum_skips_existing_members():
     _extend_airport_enum(Airport, {"SIN": "Changi"})
     assert Airport["SIN"] is Airport["SIN"]

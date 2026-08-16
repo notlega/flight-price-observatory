@@ -27,11 +27,16 @@ def _extend_airport_enum(cls: type[Airport], members: dict[str, str]) -> None:
 
 
 def init() -> None:
-    """Apply the Airport patch exactly once; idempotent."""
-    if "YIC" in _fli_decoders._AIRPORT_BY_CODE:  # type: ignore[reportPrivateUsage]
-        return
-    _extend_airport_enum(Airport, _EXTRA_AIRPORTS)
+    """Apply the Airport patch; idempotent and robust to partial patches."""
+    missing = {
+        name: value
+        for name, value in _EXTRA_AIRPORTS.items()
+        if name not in Airport.__members__
+    }
+    if missing:
+        _extend_airport_enum(Airport, missing)
     for code in _EXTRA_AIRPORTS:
-        _fli_decoders._AIRPORT_BY_CODE[code] = Airport[code]  # type: ignore[reportPrivateUsage]
+        if code in Airport.__members__:
+            _fli_decoders._AIRPORT_BY_CODE[code] = Airport[code]  # type: ignore[reportPrivateUsage]
     if "OKA" in Airport.__members__:
         _fli_decoders._AIRPORT_BY_CODE["OKA"] = Airport["OKA"]  # type: ignore[reportPrivateUsage]
