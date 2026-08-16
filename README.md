@@ -1,12 +1,8 @@
 # Flight Price Observatory
 
-Flight Price Observatory is an automated data engineering and analytics platform designed to continuously collect, store, and analyse historical airfare pricing data. The project focuses on flights departing from Singapore to selected destinations across Asia, with the objective of building a comprehensive historical dataset for trend analysis, exploratory data analysis, and future predictive modelling.
+Auto-collect, store, analyse historical airfare data. SIN -> 15 Asian destinations. Build longitudinal dataset for trend analysis + ML.
 
-Unlike conventional flight search platforms, which primarily provide current airfare information, this project continuously captures pricing snapshots over time to create a longitudinal dataset. This enables analysis of pricing behaviour across different booking windows, travel seasons, airlines, and routes, providing insights that are not readily available through individual flight searches.
-
-The platform follows a modern data engineering architecture. Automated workflows periodically retrieve flight pricing data through a provider abstraction layer, validate and transform the collected data, and store it within a private cloud-based data lake. The processed datasets are then made available for analytical workloads, dashboards, and machine learning experiments.
-
-The project also serves as a demonstration of modern software and data engineering practices, including automated data collection, cloud-native storage, ETL pipelines, data lake architecture, reproducible analytics, and modular system design. While its primary objective is to generate actionable insights into airfare trends, the system is intentionally designed to remain extensible, allowing additional data providers, destinations, and analytical capabilities to be incorporated in future iterations.
+Unlike normal flight search (show current price), this snapshots prices over time -> spot patterns across booking windows, seasons, airlines, routes.
 
 ## Table of Contents
 
@@ -16,608 +12,231 @@ The project also serves as a demonstration of modern software and data engineeri
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Installation](#installation)
-- [Configuration](#configuration)
 - [Running Locally](#running-locally)
-- [Documentation](#documentation)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
-- [Notice](#notice)
 
 ## Objectives
 
-The primary objective of the Flight Price Observatory is to develop an automated platform that continuously collects, stores, and analyses historical airfare pricing data. By building a long-term dataset of flight prices, the project aims to uncover trends and patterns that are not readily observable through conventional flight search platforms, enabling data-driven insights into airline pricing behaviour.
+**Build historical airfare dataset.** Automated pipeline, periodic snapshots, growing dataset for long-term analysis.
 
-To achieve this objective, the project has the following goals:
+**Scalable pipeline.** Modular ingestion + validation + storage. Modern data engineering.
 
-### Build a Historical Airfare Dataset
+**Cloud data lake.** Raw bundles in GitHub Releases (bronze), processed Parquet in Cloudflare R2 (silver). Immutable, queryable, versioned.
 
-Develop an automated data collection pipeline that periodically retrieves airfare information for selected flight routes, creating a continuously growing historical dataset suitable for long-term analysis.
+**Exploratory analysis.** Price trends, seasonal patterns, airline comparison, booking window behaviour.
 
-### Establish a Scalable Data Pipeline
+**Predictive analytics.** Prep for ML: price forecasting, anomaly detection, booking recommendations.
 
-Design and implement a modular data ingestion and transformation pipeline capable of validating, cleaning, and storing collected flight pricing data using modern data engineering practices.
-
-### Develop a Cloud-Based Data Lake
-
-Store both raw and processed datasets within a private cloud-based data lake to support efficient querying, historical preservation, and future scalability while maintaining data integrity.
-
-### Perform Exploratory Data Analysis
-
-Analyse the collected data to identify pricing trends, seasonal fluctuations, airline comparisons, booking window behaviour, and route-specific characteristics through statistical analysis and visualisation.
-
-### Enable Predictive Analytics
-
-Prepare the dataset for future machine learning applications, including airfare forecasting, price trend prediction, anomaly detection, and booking recommendation models.
-
-### Demonstrate Modern Engineering Practices
-
-Apply industry-standard software engineering and data engineering principles throughout the project, including modular system architecture, automated workflows, version control, cloud-native storage, reproducible data processing, and maintainable code design.
-
-### Support Future Extensibility
-
-Design the system to remain provider-agnostic and extensible, allowing additional flight data providers, destinations, analytical capabilities, and downstream applications to be integrated with minimal architectural changes.
+**Extensible design.** Provider-agnostic. Add routes, providers, analytics without rewiring core.
 
 ## System Architecture
 
-The Flight Price Observatory adopts a modular, cloud-native architecture designed to automate the collection, storage, processing, and analysis of historical airfare pricing data. Each component has a single responsibility, allowing the system to remain maintainable, extensible, and resilient to changes in upstream data providers.
+Six layers:
 
-The system is composed of six primary layers:
+**Scheduler.** GitHub Actions cron, 4-day cycle at 05:30 SGT (see [ADR-0006](docs/decisions/0006-scheduling.md)). No manual intervention.
 
-### Scheduler Layer
+**Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS). Swap or add providers without touching pipeline.
 
-GitHub Actions serves as the orchestration layer responsible for executing scheduled workflows at predefined intervals. Each workflow initiates the data collection process, ensuring that flight pricing information is captured consistently without manual intervention.
+**Routes.** `RouteCatalog` (`collector/routes.py`) defines 15 destinations out of SIN. Each date in the search window generates 30 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per SIN-origin route (return offsets 7, 14, 21 days) — 75 searches per route/date, 20,325 per full 271-day window.
 
-Future enhancements may introduce configurable collection frequencies or event-driven execution while maintaining the same pipeline architecture.
+> **Midnight caveat.** Runs crossing midnight keep only future dates after rollover: a run started 23:50 builds today's tasks, which become invalid at 00:00 and fail as `DATA` (no proxy blame); any rebuild after rollover skips past dates entirely. Past dates are unsearchable by definition — losing up to a day at the boundary is by design.
 
----
+```mermaid
+flowchart TD
+    CLI["python -m cli search --start YYYY-MM-DD --max-days 30"]
+    REG["ProviderRegistry"]
+    PROV["GoogleFlightsProvider"]
+    PIPE["BulkSearchPipeline"]
 
-### Data Collection Layer
+    CLI --> REG --> PROV --> PIPE
 
-The data collection layer is responsible for retrieving flight pricing information from external providers.
+    PIPE --> ROT["ProxyRotator<br/>2-phase validate TCP|HTTP echo, weighted select"]
+    PIPE --> RL["RateLimiter<br/>adaptive token bucket, halve on 429 burst, double on clean 60s"]
+    PIPE --> SQL["SQLite aiosqlite<br/>upsert intermediary, track retries"]
+    PIPE --> RETRY["Retry loop x3<br/>cumulative attempt budget (retries <= r x 3)"]
+    SQL --> CONV["cli convert<br/>SQLite -> JSONL, DB retained"]
 
-Rather than tightly coupling the application to a single provider, the system implements a provider abstraction layer. Each provider adheres to a common interface, allowing new providers to be integrated with minimal changes to the remainder of the system.
-
-This design enables the project to remain resilient should an individual provider become unavailable or change its implementation.
-
-Primary responsibilities include:
-
-- Retrieving flight pricing data
-- Standardising provider responses
-- Handling request failures and retries
-- Rate limiting and request management
-
----
-
-### Validation & Transformation Layer
-
-Raw provider responses are validated before being transformed into a standardised internal data model.
-
-This stage performs tasks such as:
-
-- Schema validation
-- Data type validation
-- Duplicate detection
-- Data normalisation
-- Derived attribute generation
-- Metadata enrichment
-
-Maintaining a consistent schema ensures that downstream analytical processes remain independent of provider-specific response formats.
-
----
-
-### Data Lake Layer
-
-Validated datasets are stored within a private Cloudflare R2 data lake.
-
-The storage architecture follows an immutable design where raw provider responses are preserved separately from processed analytical datasets. This approach allows historical data to be reprocessed should transformation logic change in the future.
-
-The data lake consists of multiple storage tiers:
-
-- Raw JSON datasets
-- Processed Parquet datasets
-- Analytics-ready datasets
-
-Partitioning datasets by collection date enables efficient querying while reducing unnecessary data movement.
-
----
-
-### Analytics Layer
-
-DuckDB serves as the analytical query engine responsible for performing SQL-based analysis directly against Parquet datasets stored within the data lake.
-
-This layer supports:
-
-- Exploratory data analysis
-- Route comparisons
-- Airline comparisons
-- Seasonal trend analysis
-- Booking window analysis
-- Statistical aggregation
-
-Separating analytical workloads from the ingestion pipeline allows each component to evolve independently.
-
----
-
-### Presentation Layer
-
-Processed analytical datasets are visualised through an interactive dashboard.
-
-The dashboard provides insights into historical airfare behaviour through charts, summary statistics, and trend visualisations while remaining decoupled from the underlying data collection pipeline.
-
-Future iterations may expose analytical datasets through APIs or machine learning services.
-
----
-
-### High-Level Architecture
-
-```text
-                    GitHub Actions
-                 (Scheduled Workflow)
-
-                           │
-
-                           ▼
-
-               Flight Provider Interface
-
-                           │
-
-          ┌────────────────┴────────────────┐
-
-          ▼                                 ▼
-
-   Skyscanner Provider              Future Providers
-
-          │
-
-          ▼
-
-      Validation Layer
-
-          │
-
-          ▼
-
-   Transformation Pipeline
-
-          │
-
-          ▼
-
-      Cloudflare R2 Data Lake
-
-          │
-
-    ┌─────┴───────────────┐
-
-    ▼                     ▼
-
- Raw JSON          Processed Parquet
-
-    └──────────────┬──────────────┘
-
-                   ▼
-
-                DuckDB
-
-                   ▼
-
-          Analytics Dashboard
+    CONV --> OUT["storage/raw/search_YYYYMMDD_HHMMSS.jsonl"]
+    OUT --> GZ["gzip -> cycle GitHub Release (bronze)"]
+    OUT --> TF["cli transform<br/>DuckDB -> Parquet silver"]
+    TF --> R2["R2 (silver)"]
 ```
 
----
+Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/design.md), [docs/data-model.md](docs/data-model.md).
+
+**Validation + transformation.** Schema validation, type checking, dedup, normalisation, enrichment. Separate raw from processed.
+
+**Data lake.** Bronze: one GitHub Release per cycle (`bronze-YYYYMMDD`, tag `cycle-YYYYMMDD`) carrying the gzipped JSONL bundle from each of the 4 runs. Silver: Parquet (Hive-partitioned by route) uploaded to R2. Gold (aggregated analytics) later. Immutable raw tier enables reprocessing.
+
+**Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis.
+
+**Presentation.** (Future) Dashboard -- Streamlit + Plotly. Decoupled from pipeline. Consumes processed datasets only.
 
 ## Technology Stack
 
-The project utilises a modern Python-based data engineering stack chosen for its simplicity, scalability, interoperability, and suitability for analytical workloads.
-
-### Programming Language
-
-| Component | Technology   | Purpose                      |
-| --------- | ------------ | ---------------------------- |
-| Language  | Python 3.12+ | Core application development |
-
-Python provides a mature ecosystem for HTTP communication, data processing, automation, analytics, and machine learning, allowing the entire platform to be developed using a single language.
-
----
-
-### Workflow Orchestration
-
-| Component | Technology     | Purpose                      |
-| --------- | -------------- | ---------------------------- |
-| Scheduler | GitHub Actions | Automated workflow execution |
-
-GitHub Actions schedules and executes the data collection pipeline without requiring dedicated infrastructure or self-hosted schedulers.
-
----
-
-### HTTP Communication
-
-| Component   | Technology | Purpose           |
-| ----------- | ---------- | ----------------- |
-| HTTP Client | httpx      | API communication |
-
-The HTTP client is responsible for interacting with external flight data providers while supporting modern HTTP features and future asynchronous execution if required.
-
----
-
-### Data Processing
-
-| Component  | Technology | Purpose                            |
-| ---------- | ---------- | ---------------------------------- |
-| DataFrames | Polars     | High-performance data manipulation |
-| Validation | Pydantic   | Schema validation and type safety  |
-
-Polars performs transformation and aggregation of collected datasets, while Pydantic validates incoming provider responses before storage.
-
----
-
-### Data Storage
-
-| Component         | Technology    | Purpose                      |
-| ----------------- | ------------- | ---------------------------- |
-| Raw Format        | JSON          | Immutable provider responses |
-| Analytical Format | Parquet       | Optimised analytical storage |
-| Data Lake         | Cloudflare R2 | Private object storage       |
-| Query Engine      | DuckDB        | SQL analytics over Parquet   |
-
-Raw data is preserved for reproducibility, while processed datasets are stored using the Parquet columnar format to support efficient analytical queries.
-
----
-
-### Visualisation
-
-| Component | Technology | Purpose                          |
-| --------- | ---------- | -------------------------------- |
-| Dashboard | Streamlit  | Interactive analytical dashboard |
-| Charts    | Plotly     | Interactive data visualisation   |
-
-The presentation layer enables users to explore historical pricing trends through interactive visualisations without directly interacting with the underlying datasets.
-
----
-
-### Development
-
-| Component          | Technology | Purpose                               |
-| ------------------ | ---------- | ------------------------------------- |
-| Version Control    | Git        | Source code management                |
-| Repository         | GitHub     | Code hosting                          |
-| Testing            | pytest     | Automated testing                     |
-| Package Management | uv         | Dependency and environment management |
-
-The development toolchain emphasises reproducibility, maintainability, and continuous integration throughout the software development lifecycle.
+| Component       | Technology        | Why                                         |
+|-----------------|-------------------|---------------------------------------------|
+| Language        | Python 3.14+      | One language, entire stack                  |
+| HTTP            | curl_cffi         | TLS fingerprint spoofing, browser impersonation |
+| Proxy fetch     | httpx             | Pull proxy lists from 15 high-yield sources |
+| SQLite          | aiosqlite         | Async intermediary storage, upsert + retry  |
+| Flights API     | fli               | Google Flights internal API wrapper         |
+| Progress        | log lines         | Periodic %/rate/ETA progress in logs       |
+| Scheduler       | GitHub Actions    | Cron, no infra                              |
+| Package mgmt    | uv                | Fast, reproducible                          |
+| Testing         | pytest + ruff + basedpyright + coverage | 338 tests, 97% cov |
+| Storage         | Cloudflare R2     | S3-compatible, free 10 GB, pay after        |
+| Query           | DuckDB            | SQL over Parquet, no server                 |
+| Viz             | Streamlit + Plotly| (Future) interactive dashboard              |
 
 ## Project Structure
 
-The repository is organised into modular components that separate application logic, data processing, storage, documentation, and infrastructure. Each directory has a clearly defined responsibility to improve maintainability, scalability, and ease of navigation.
-
-```text
+```
 flight-price-observatory/
-
-├── .github/
-│   └── workflows/
-│       └── collect-flight-data.yml
-│
-├── docs/
-│   ├── architecture.md
-│   ├── design.md
-│   ├── data-model.md
-│   └── decisions/
-│
-├── collector/
-│   ├── providers/
-│   ├── models/
-│   ├── services/
-│   └── main.py
-│
-├── pipeline/
-│   ├── validation/
-│   ├── transformation/
-│   └── enrichment/
-│
-├── storage/
-│   ├── r2/
-│   └── parquet/
-│
-├── analytics/
-│   ├── queries/
-│   ├── notebooks/
-│   └── reports/
-│
-├── dashboard/
-│
-├── tests/
-│
-├── pyproject.toml
-├── README.md
-└── LICENSE
++-- .github/
+|   +-- workflows/          # ci.yml (lint + test), collect.yml (scheduled collection)
++-- cli/                    # CLI entry points (search, convert, transform, publish)
++-- collector/              # core package: providers, services, models
+|   +-- providers/          #   one dir per flight data source (BaseProvider)
+|   +-- services/           #   pipeline + rate limiter
+|   +-- models/             #   domain objects
++-- storage/                # runtime data (gitignored outputs)
+|   +-- raw/                #   final JSONL
+|   +-- db/                 #   transient SQLite state
+|   +-- logs/               #   run logs (gitignored)
+|   +-- proxy_cache.json    #   proxy pool cache (gitignored)
++-- docs/                   # architecture, design, data model, ADRs
++-- tests/                  # mirrors collector/ module structure
+|   +-- libs/               #   factories + fakes (shared test helpers)
++-- pyproject.toml
++-- README.md
 ```
 
-### Repository Overview
+### cli/
 
-#### `.github/`
+CLI commands. `__main__.py` dispatches via argparse subparsers. Add commands by adding module + registering subparser.
 
-Contains all GitHub Actions workflows responsible for automating scheduled data collection, testing, and future deployment tasks.
+### collector/
 
-Typical responsibilities include:
+Core collection logic. Provider-agnostic pipeline. New provider = new file under `providers/` implementing `BaseProvider`.
 
-- Scheduled data collection
-- Continuous Integration (CI)
-- Automated testing
-- Workflow orchestration
+### storage/
 
----
-
-#### `docs/`
-
-Contains all project documentation.
-
-Documentation is intentionally separated from the source code to improve discoverability and maintain a clear distinction between implementation and design.
-
-Example documents include:
-
-- Software Design Document
-- System Architecture
-- Data Model
-- Development Roadmap
-- Architecture Decision Records (ADRs)
-
----
-
-#### `collector/`
-
-Implements the data collection layer.
-
-This module communicates with external flight data providers and converts provider-specific responses into a standardised internal representation.
-
-Responsibilities include:
-
-- Provider abstraction
-- API communication
-- Request retries
-- Error handling
-- Response parsing
-
-The provider abstraction allows additional flight data providers to be integrated without affecting downstream components.
-
----
-
-#### `pipeline/`
-
-Implements the Extract, Transform, Load (ETL) pipeline.
-
-After data is collected, it is validated, normalised, enriched, and prepared for long-term storage.
-
-Typical processing tasks include:
-
-- Schema validation
-- Data cleaning
-- Duplicate detection
-- Derived attribute generation
-- Metadata enrichment
-- Dataset transformation
-
----
-
-#### `storage/`
-
-Provides a storage abstraction over the project's data lake.
-
-This module is responsible for reading from and writing to Cloudflare R2 while hiding storage-specific implementation details from the remainder of the application.
-
-Responsibilities include:
-
-- Uploading raw datasets
-- Downloading analytical datasets
-- Writing Parquet files
-- Managing dataset partitions
-
----
-
-#### `analytics/`
-
-Contains analytical workloads performed on the historical datasets.
-
-This directory includes reusable SQL queries, exploratory notebooks, and generated reports that operate on processed datasets rather than raw provider responses.
-
-Example analyses include:
-
-- Route comparison
-- Airline comparison
-- Booking window analysis
-- Seasonal trends
-- Historical price distributions
-
----
-
-#### `dashboard/`
-
-Contains the presentation layer of the project.
-
-The dashboard provides an interactive interface for exploring historical airfare data through charts, tables, filters, and summary statistics.
-
-The dashboard remains independent from the ingestion pipeline and consumes only processed analytical datasets.
-
----
-
-#### `tests/`
-
-Contains automated unit, integration, and future end-to-end tests.
-
-Testing is organised to verify individual modules independently while ensuring the complete data collection pipeline functions correctly.
-
----
-
-### Root Files
-
-#### `README.md`
-
-Provides a high-level introduction to the project, installation instructions, repository overview, and links to detailed documentation.
-
----
-
-#### `pyproject.toml`
-
-Defines project metadata, dependencies, build configuration, and development tooling.
-
----
-
-#### `LICENSE` and `NOTICE`
-
-Specifies the licensing terms governing the source code and repository.
+`raw/` -- final JSONL output. `db/` -- SQLite search state (always kept; retries/`--continue` read it). `silver/` -- Parquet output of `cli transform`.
 
 ## Getting Started
 
-Follow the steps below to set up the project for local development.
-
 ### Prerequisites
 
-Ensure the following software is installed before continuing:
-
-- Python 3.12 or later
+- Python 3.14+
 - Git
-- A GitHub account
-- A Cloudflare account with an R2 bucket
-- Flight data provider credentials (if required)
+- uv
 
-### Clone the Repository
-
-```bash
-git clone https://github.com/notlega/flight-price-observatory.git
-
-cd flight-price-observatory
 ```
-
----
-
-## Installation
-
-This project uses **uv** for dependency management.
-
-Install all project dependencies using:
-
-```bash
+git clone https://github.com/notlega/flight-price-observatory.git
+cd flight-price-observatory
 uv sync
 ```
 
----
+No env vars needed for local collection. R2 upload requires credentials when configured.
 
-## Configuration
+## Installation
 
-Project configuration is managed through environment variables.
-
-Create a local environment file:
-
-```text
-.env
 ```
-
-Example:
-
-```text
-FLIGHT_PROVIDER_API_KEY=
-
-R2_ACCESS_KEY=
-R2_SECRET_KEY=
-R2_BUCKET=
-R2_ENDPOINT=
-
-R2_REGION=
-
-COLLECTION_SCHEDULE=
+uv sync
 ```
-
-The `.env` file should never be committed to source control.
-
----
 
 ## Running Locally
 
-Run a manual collection job:
-
-```bash
-uv run python -m scraper.main
 ```
+# Search next 270 days
+uv run python -m cli search
 
-Run the analytics pipeline:
+# Custom window
+uv run python -m cli search --start 2026-07-11 --max-days 90
 
-```bash
-uv run python -m pipeline.main
-```
+# Currency + rate/concurrency tuning
+uv run python -m cli search --currency USD --rate 5 --workers 10
 
-Launch the dashboard:
+# Verbose debug (global flag, before or after subcommand)
+uv run python -m cli -v search
+uv run python -m cli search --verbose
 
-```bash
-streamlit run dashboard/app.py
-```
+# Convert existing SQLite state to JSONL (DB is always kept)
+uv run python -m cli convert
 
-Run automated tests:
+# Convert a specific state file
+uv run python -m cli convert storage/db/search_state.db --output /tmp/out.jsonl
 
-```bash
+# Transform raw JSONL to Parquet (silver), Hive-partitioned by route
+uv run python -m cli transform --input storage/raw/search_20260817_040546.jsonl
+
+# Publish silver to Cloudflare R2 (env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+# R2_SECRET_ACCESS_KEY, R2_BUCKET)
+uv run python -m cli publish
+
+# Run tests + lint
 uv run pytest
+uv run lint
 ```
 
----
+`search` flags:
 
-## Documentation
+| Flag        | Default | Description          |
+|-------------|---------|----------------------|
+| `--start`   | today   | Start date (YYYY-MM-DD) |
+| `--max-days`| 270     | Days ahead from start |
+| `--currency`| SGD     | Currency code for pricing |
+| `--rate`    | 200     | Requests per second  |
+| `--workers` | 50     | Max concurrent searches |
+| `--continue`| False   | Retry only failed tasks from the existing DB (`--start`/`--max-days` ignored) |
+| `-v`        | False   | Debug logging (global, also after subcommand) |
 
-Additional project documentation is available under the `docs/` directory.
+`convert` flags:
 
-| Document          | Description                           |
-| ----------------- | ------------------------------------- |
-| `design.md`       | Project overview and design decisions |
-| `architecture.md` | System architecture                   |
-| `data-model.md`   | Dataset schema                        |
-| `decisions/`      | Architecture Decision Records (ADRs)  |
+| Flag        | Default | Description          |
+|-------------|---------|----------------------|
+| `db` (positional) | `storage/db/search_state.db` | SQLite state file |
+| `--output`  | auto    | Output JSONL path (`storage/raw/search_YYYYMMDD_HHMMSS.jsonl`) |
 
----
+`transform` flags:
+
+| Flag        | Default | Description          |
+|-------------|---------|----------------------|
+| `--input`   | latest `storage/raw/search_*.jsonl` | Raw JSONL path |
+| `--output`  | `storage/silver/<timestamp>` | Parquet output directory |
+
+`publish` flags:
+
+| Flag        | Default | Description          |
+|-------------|---------|----------------------|
+| `--input`   | `storage/silver` | Parquet directory to upload |
 
 ## Roadmap
 
-The project is currently under active development.
-
-Planned milestones include:
-
-- Build provider abstraction layer
-- Implement automated data collection
-- Integrate Cloudflare R2 data lake
-- Develop ETL pipeline
-- Build analytical data model
-- Develop interactive dashboard
-- Implement statistical analysis
-- Explore predictive machine learning models
-- Improve monitoring and observability
-- Support additional flight data providers
-
-Future milestones may evolve as project requirements change.
-
----
+- [x] Provider abstraction layer
+- [x] Automated data collection with proxy rotation
+- [x] SQLite intermediary + retry loop
+- [x] Google Flights provider (15 SIN<->Asia routes)
+- [x] Adaptive collection schedule (4-day cycle: full 0-270d, then 0-30d/0-60d/0-90d — see ADR-0006)
+- [x] Bronze bundles in GitHub Releases (gzip) + R2 upload of silver Parquet
+- [x] Bronze->silver Parquet transformation (DuckDB)
+- [ ] DuckDB analytical queries
+- [ ] Interactive dashboard
+- [ ] Price forecasting ML models
+- [ ] Additional providers
 
 ## Contributing
 
-Contributions are welcome.
-
-Before submitting a contribution, please:
-
-1. Open an issue describing the proposed change.
-2. Discuss significant architectural changes before implementation.
-3. Create a feature branch from the latest main branch.
-4. Ensure all tests pass before submitting a pull request.
-5. Follow the project's coding conventions and documentation standards.
-
-For major architectural decisions, contributors are encouraged to document the rationale using an Architecture Decision Record (ADR) within the `docs/decisions/` directory.
-
----
+1. Open issue proposing change
+2. Discuss architecture changes before code
+3. Feature branch from main
+4. `uv run pytest` pass before PR
+5. Match code style (ruff)
+6. ADR in `docs/decisions/` for major decisions
 
 ## License
 
-This project is licensed under the terms of the license contained in the `LICENSE` file.
-
-By contributing to this repository, contributors agree that their contributions will be licensed under the same terms unless explicitly agreed otherwise.
-
----
-
-## Notice
-
-Additional copyright notices, acknowledgements, and attribution information are provided in the `NOTICE` file where applicable.
+See `LICENSE` file. Contributors agree to same terms.

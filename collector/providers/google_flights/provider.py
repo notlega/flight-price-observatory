@@ -1,0 +1,332 @@
+"""Google Flights provider backed by the fli wire protocol."""
+
+import asyncio
+import logging
+from copy import deepcopy
+from typing import Any, cast
+
+from curl_cffi import requests
+from curl_cffi.requests import AsyncSession
+from fli.models import (
+    Airport,
+    FlightResult,
+    FlightSearchFilters,
+    FlightSegment,
+    MaxStops,
+    PassengerInfo,
+    SeatType,
+    SortBy,
+    TripType,
+)
+from fli.search._decoders import parse_flight_row
+from fli.search._urls import with_locale_params
+from fli.search._wire import parse_first_wrb_payload
+from pydantic import ValidationError
+
+from collector.errors import (
+    ProviderBlockedError,
+    ProviderConnectionError,
+    ProviderDataError,
+    ProviderRateLimitedError,
+    ProviderTimeoutError,
+)
+from collector.models.flight_result import FlightResultDict
+from collector.providers.base import BaseProvider
+from collector.routes import RouteCatalog
+
+logger = logging.getLogger(__name__)
+
+_SHOPPING_URL = (
+    "https://www.google.com/_/FlightsFrontendUi/data/"
+    "travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
+)
+
+_HEADERS = {
+    "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+}
+
+_STUB_MAX_LEN = 1024
+
+_REQUEST_TIMEOUT = 30
+
+_FLIGHTS_PAGE_INDEXES = (2, 3)
+
+_BLOCK_MARKERS = ("captcha", "unusual traffic", "attention required", "access denied")
+
+
+def _extract_flights_raw(inner: list[object]) -> list[Any]:
+    """Pull raw flight rows out of the WRB payload page structure."""
+    items: list[Any] = []
+    for i in _FLIGHTS_PAGE_INDEXES:
+        page = cast(list[Any], inner[i])
+        if not page:
+            continue
+        rows = cast(list[Any], page[0])
+        if rows:
+            items.extend(rows)
+    return items
+
+
+def _raise_for_http_status(response: requests.Response, url: str) -> None:
+    """Map HTTP status/block markers to typed provider errors."""
+    if response.status_code == 429:
+        raise ProviderRateLimitedError(f"HTTP 429 from {url}")
+    if response.status_code >= 500:
+        raise ProviderConnectionError(f"HTTP {response.status_code} from {url}")
+    body = response.text.lower()
+    if response.status_code == 403 or (
+        response.status_code == 200 and any(marker in body for marker in _BLOCK_MARKERS)
+    ):
+        raise ProviderRateLimitedError(f"HTTP {response.status_code} block from {url}")
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise ProviderDataError(f"HTTP {response.status_code} from {url}") from e
+
+
+def _parse_flights(flights_raw: list[Any]) -> list[FlightResult]:
+    """Parse raw rows into FlightResults, skipping unparseable rows."""
+    flights: list[FlightResult] = []
+    for row in flights_raw:
+        try:
+            flights.append(parse_flight_row(row))
+        except (ValueError, TypeError, KeyError, IndexError) as e:
+            logger.debug("Skipping unparseable flight row: %s", e)
+    return flights
+
+
+def _search_context(filters: FlightSearchFilters) -> str:
+    """Return a short human-readable route/departure description."""
+    seg = filters.flight_segments[0]
+    dep = seg.departure_airport[0][0]
+    arr = seg.arrival_airport[0][0]
+    if isinstance(dep, Airport) and isinstance(arr, Airport):
+        return f"route={dep.value}->{arr.value} dep={seg.travel_date}"
+    return f"route=?->? dep={seg.travel_date}"
+
+
+class GoogleFlightsProvider(BaseProvider):
+    """Google Flights provider speaking the fli wire protocol."""
+
+    name = "google_flights"
+
+    def __init__(self, rt_expand_top_n: int = 3) -> None:
+        """Create provider; initialises the airport enum once."""
+        from collector._fli_airports import init
+
+        init()
+        self._rt_expand_top_n = rt_expand_top_n
+
+    @property
+    def supports(self) -> set[tuple[str, str]]:
+        """Return the one-way route codes this provider covers."""
+        return {(route.origin, route.dest) for route in RouteCatalog.one_way_routes()}
+
+    def _build_filters(
+        self,
+        origin: Airport,
+        dest: Airport,
+        date_str: str,
+        return_date: str | None,
+    ) -> FlightSearchFilters:
+        """Build flight search filters for one-way or round-trip segments."""
+        segments = [
+            FlightSegment(
+                departure_airport=[[origin, 0]],
+                arrival_airport=[[dest, 0]],
+                travel_date=date_str,
+            )
+        ]
+        trip_type = TripType.ONE_WAY
+        if return_date:
+            segments.append(
+                FlightSegment(
+                    departure_airport=[[dest, 0]],
+                    arrival_airport=[[origin, 0]],
+                    travel_date=return_date,
+                )
+            )
+            trip_type = TripType.ROUND_TRIP
+
+        return FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=segments,
+            seat_type=SeatType.ECONOMY,
+            stops=MaxStops.ANY,
+            sort_by=SortBy.CHEAPEST,
+            trip_type=trip_type,
+        )
+
+    async def _post_shopping(
+        self,
+        filters: FlightSearchFilters,
+        currency: str,
+        proxy_url: str,
+        session: AsyncSession,
+    ) -> list[FlightResult] | None:
+        """POST the shopping request and parse the WRB flight response."""
+        encoded = filters.encode()
+        url = with_locale_params(_SHOPPING_URL, currency, None, None)
+
+        try:
+            response = await session.post(
+                url,
+                data=f"f.req={encoded}",
+                impersonate="chrome",
+                allow_redirects=True,
+                proxies={"all": proxy_url},
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.Timeout as e:
+            raise ProviderTimeoutError(str(e)) from e
+        except requests.exceptions.ProxyError as e:
+            raise ProviderConnectionError(str(e)) from e
+        except requests.exceptions.ConnectionError as e:
+            raise ProviderConnectionError(str(e)) from e
+
+        _raise_for_http_status(response, url)
+
+        inner = parse_first_wrb_payload(response.text)
+        if inner is None:
+            logger.warning(
+                "No wrb payload %s: status=%s len=%s marker=%s",
+                _search_context(filters),
+                response.status_code,
+                len(response.text),
+                "wrb" in response.text,
+            )
+            if len(response.text) < _STUB_MAX_LEN:
+                raise ProviderBlockedError(
+                    f"Blocked stub response for {_search_context(filters)}"
+                )
+            return None
+
+        try:
+            flights_raw = _extract_flights_raw(inner)
+        except IndexError, TypeError:
+            logger.warning(
+                "Malformed flights page %s: status=%s len=%s",
+                _search_context(filters),
+                response.status_code,
+                len(response.text),
+            )
+            return None
+
+        flights = _parse_flights(flights_raw)
+        if not flights:
+            logger.warning(
+                "No flights parsed %s: status=%s len=%s raw_rows=%d",
+                _search_context(filters),
+                response.status_code,
+                len(response.text),
+                len(flights_raw),
+            )
+        return flights or None
+
+    @staticmethod
+    def _merge_round_trip(
+        outbound: FlightResult, inbound: FlightResult
+    ) -> FlightResult:
+        """Combine outbound and inbound legs into one round-trip result."""
+        total_price = (outbound.price or 0) + (inbound.price or 0)
+        return outbound.model_copy(
+            update={
+                "legs": outbound.legs + inbound.legs,
+                "price": total_price or None,
+                "duration": outbound.duration + inbound.duration,
+                "stops": outbound.stops + inbound.stops,
+                "booking_token": inbound.booking_token or outbound.booking_token,
+            }
+        )
+
+    async def _search_round_trip(
+        self,
+        outbound: list[FlightResult],
+        filters: FlightSearchFilters,
+        currency: str,
+        proxy_url: str,
+        session: AsyncSession,
+    ) -> list[FlightResultDict] | None:
+        """Expand the top outbound options into merged round-trip results."""
+        selected = outbound[: self._rt_expand_top_n]
+
+        async def expand(out: FlightResult) -> list[FlightResult]:
+            next_filters = deepcopy(filters)
+            next_filters.flight_segments[0].selected_flight = out
+            inbound = await self._post_shopping(
+                next_filters, currency, proxy_url, session
+            )
+            if not inbound:
+                return []
+            return [self._merge_round_trip(out, rt) for rt in inbound]
+
+        results = await asyncio.gather(
+            *(expand(o) for o in selected), return_exceptions=True
+        )
+
+        combos: list[FlightResult] = []
+        first_error: BaseException | None = None
+        for result in results:
+            if isinstance(result, BaseException):
+                if first_error is None:
+                    first_error = result
+                logger.debug("Round-trip expand failed: %s", result)
+                continue
+            combos.extend(result)
+        if not combos:
+            if first_error is not None:
+                raise first_error
+            return None
+        return cast(list[FlightResultDict], [c.model_dump(mode="json") for c in combos])
+
+    async def search(
+        self,
+        origin: Airport,
+        dest: Airport,
+        date_str: str,
+        currency: str = "SGD",
+        proxy_url: str | None = None,
+        session: AsyncSession | None = None,
+        return_date: str | None = None,
+    ) -> list[FlightResultDict] | None:
+        """Search flights for one origin-destination-date combination.
+
+        Args:
+            origin: Departure airport.
+            dest: Destination airport.
+            date_str: Departure date (ISO-8601).
+            currency: Currency for prices.
+            proxy_url: Proxy URL; required (direct connections forbidden).
+            session: Reusable curl session; a new one is created if absent.
+            return_date: Return date for round trips, else one-way.
+
+        Returns:
+            Serialised flight results, or None when no flights are found.
+        """
+        proxy_url = self._require_proxy(proxy_url)
+
+        try:
+            filters = self._build_filters(origin, dest, date_str, return_date)
+        except ValidationError as e:
+            raise ProviderDataError(f"Invalid search parameters: {e}") from e
+
+        owns_session = session is None
+        session = session or AsyncSession()
+        try:
+            session.headers.update(_HEADERS)
+            outbound = await self._post_shopping(filters, currency, proxy_url, session)
+            if not outbound:
+                return None
+
+            if not return_date:
+                return cast(
+                    list[FlightResultDict],
+                    [f.model_dump(mode="json") for f in outbound],
+                )
+
+            return await self._search_round_trip(
+                outbound, filters, currency, proxy_url, session
+            )
+        finally:
+            if owns_session:
+                await session.close()

@@ -1,0 +1,140 @@
+name: Collect flight prices
+
+on:
+  schedule:
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+    inputs:
+      continue:
+        description: >-
+          Resume: retry failed tasks from the cached search state for the
+          current cycle (search/convert/release steps are re-run).
+        type: boolean
+        default: false
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      ANCHOR_DATE: 2026-08-18
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --no-dev
+
+      - name: Compute cycle day, window and release metadata
+        run: |
+          eval "$(python3 - <<'PY'
+          from datetime import date, timedelta
+
+          anchor = date.fromisoformat("${{ env.ANCHOR_DATE }}")
+          today = date.today()
+          offset = (today - anchor).days
+          cycle_day = offset % 4
+          cycle_start = anchor + timedelta(days=(offset // 4) * 4)
+
+          windows = {0: ("full", 270), 1: ("w30", 30), 2: ("w60", 60), 3: ("w90", 90)}
+          window, max_days = windows[cycle_day]
+
+          print(f"CYCLE_DAY={cycle_day}")
+          print(f"WINDOW={window}")
+          print(f"MAX_DAYS={max_days}")
+          print(f"CYCLE_TAG=cycle-{cycle_start:%Y%m%d}")
+          print(f"CYCLE_DATE={cycle_start:%Y%m%d}")
+          print(f"RUN_TS={today:%Y%m%d}_053000")
+          print(f"ASSET=search_{today:%Y%m%d}_053000_{window}.jsonl.gz")
+          PY
+          )"
+          echo "CYCLE_DAY=$CYCLE_DAY" >> "$GITHUB_ENV"
+          echo "WINDOW=$WINDOW" >> "$GITHUB_ENV"
+          echo "MAX_DAYS=$MAX_DAYS" >> "$GITHUB_ENV"
+          echo "CYCLE_TAG=$CYCLE_TAG" >> "$GITHUB_ENV"
+          echo "CYCLE_DATE=$CYCLE_DATE" >> "$GITHUB_ENV"
+          echo "RUN_TS=$RUN_TS" >> "$GITHUB_ENV"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+          echo "cycle_day=$CYCLE_DAY window=$WINDOW max_days=$MAX_DAYS tag=$CYCLE_TAG asset=$ASSET"
+
+      - name: Resume flag
+        id: resume
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+            && [ "${{ inputs.continue }}" = "true" ]; then
+            echo "continue=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "continue=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore search state
+        if: steps.resume.outputs.continue == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: storage/db/search_state.db
+          key: ${{ env.CYCLE_TAG }}-search-state
+
+      - name: Start fresh state on regular runs
+        if: steps.resume.outputs.continue != 'true'
+        run: rm -f storage/db/search_state.db
+
+      - name: Run search
+        run: |
+          CONTINUE_FLAG=""
+          if [ "${{ steps.resume.outputs.continue }}" = "true" ]; then
+            CONTINUE_FLAG="--continue"
+          fi
+          uv run python -m cli search --max-days "$MAX_DAYS" $CONTINUE_FLAG
+
+      - name: Cache search state
+        uses: actions/cache/save@v4
+        if: always() && hashFiles('storage/db/search_state.db') != ''
+        with:
+          path: storage/db/search_state.db
+          key: ${{ env.CYCLE_TAG }}-search-state
+
+      - name: Export to JSONL
+        id: convert
+        run: |
+          JSONL="$(uv run python -m cli convert | sed -n 's/^Output: //p')"
+          test -n "$JSONL"
+          echo "jsonl=$JSONL" >> "$GITHUB_OUTPUT"
+          echo "jsonl=$JSONL"
+
+      - name: Compress raw bundle
+        run: |
+          gzip -k "${{ steps.convert.outputs.jsonl }}"
+          mv "${{ steps.convert.outputs.jsonl }}.gz" "storage/raw/$ASSET"
+
+      - name: Upload raw bundle to cycle release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.CYCLE_TAG }}
+          name: bronze-${{ env.CYCLE_DATE }}
+          draft: ${{ env.CYCLE_DAY != '3' }}
+          make_latest: false
+          files: storage/raw/${{ env.ASSET }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Transform to Parquet (silver)
+        run: |
+          uv run python -m cli transform \
+            --input "${{ steps.convert.outputs.jsonl }}" \
+            --output "storage/silver/$RUN_TS"
+
+      - name: Publish silver to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: uv run python -m cli publish --input storage/silver
