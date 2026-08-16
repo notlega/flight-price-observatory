@@ -27,6 +27,10 @@ class ProviderBlockedError(ProviderDataError):
     pass
 
 
+class RepositoryStateError(Exception):
+    """Invalid or missing database state for a continue run."""
+
+
 class ErrorType(StrEnum):
     NO_PROXY = "no_proxy"
     RATE_LIMITED = "429"

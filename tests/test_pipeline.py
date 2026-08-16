@@ -46,6 +46,19 @@ def test_search_parser_worker_default():
     assert ns.workers == 50
 
 
+def test_search_parser_continue_flag():
+    from argparse import ArgumentParser
+
+    from cli.search import configure_parser
+
+    parser = ArgumentParser()
+    configure_parser(parser.add_subparsers())
+    ns = parser.parse_args(["search", "--continue"])
+    assert ns.continue_run is True
+    ns2 = parser.parse_args(["search"])
+    assert ns2.continue_run is False
+
+
 def _make_pipeline(provider=None, rotator=None, repo=None, **kwargs):
     pipeline = BulkSearchPipeline(
         providers=[provider or FakeProvider()],
@@ -848,6 +861,45 @@ async def test_run_skips_past_dates(tmp_path):
         (ROUTE, dep, "2026-08-17", "ROUND_TRIP", SIN.value, KUL.value),
         (ROUTE, dep, "2026-08-24", "ROUND_TRIP", SIN.value, KUL.value),
     ]
+
+
+async def test_run_continue_skips_seeding_and_retries_failures(tmp_path):
+    provider = FakeProvider(script=[make_flights(100)] * 4)
+    rotator = FakeRotator(proxies=[make_proxy()], working=1)
+    repo = FakeRepo()
+    repo.failed = [(ROUTE, "2099-01-01", "", "ONE_WAY")]
+    max_retries_calls: list[int | None] = []
+
+    async def recording_get_failed(max_retries=3):
+        max_retries_calls.append(max_retries)
+        return repo.failed
+
+    repo.get_failed = recording_get_failed  # type: ignore[method-assign]
+    pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
+    pipeline.db_path = str(tmp_path / "state.db")
+
+    with (
+        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
+        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
+    ):
+        await pipeline.run(
+            date(2026, 8, 1),
+            date(2026, 8, 1),
+            max_days_ahead=330,
+            continue_run=True,
+        )
+
+    assert repo.require_existing_called is True
+    assert repo.inserted == []
+    assert repo.purged_calls == 0
+    assert max_retries_calls and all(m is None for m in max_retries_calls)
+    assert repo.upserts
+    assert all(r["success"] is True for r in repo.upserts)
+    convert.assert_awaited_once_with(
+        str(tmp_path / "state.db"),
+        ANY,
+        delete=True,
+    )
 
 
 def test_ahead_days_from_today_matches_window():

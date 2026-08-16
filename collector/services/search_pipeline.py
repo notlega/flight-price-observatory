@@ -361,10 +361,14 @@ class BulkSearchPipeline:
                 m[_route_key(origin, dest)] = (p, origin, dest)
         return m
 
-    async def _retry_loop(self, rounds: int = 3) -> None:
+    async def _retry_loop(
+        self, rounds: int = 3, retry_all_failures: bool = False
+    ) -> None:
         provider_map = await self._get_provider_map()
         for rnd in range(1, rounds + 1):
-            failed = await self.repo.get_failed(max_retries=rnd * _MAX_ATTEMPTS)
+            failed = await self.repo.get_failed(
+                max_retries=None if retry_all_failures else rnd * _MAX_ATTEMPTS
+            )
             if not failed:
                 logger.info("No failed tasks to retry")
                 return
@@ -504,33 +508,48 @@ class BulkSearchPipeline:
         start_date: date,
         end_date: date,
         max_days_ahead: int = DEFAULT_MAX_DAYS_AHEAD,
+        continue_run: bool = False,
     ) -> None:
-        """Run the full bulk search lifecycle.
+        """Run the bulk search lifecycle.
 
         Builds tasks, seeds the DB, refreshes the proxy pool, executes
-        batches, retries transient failures, then exports to JSONL.
+        batches, retries transient failures, then exports to JSONL. With
+        ``continue_run`` the existing DB is reused and only previously failed
+        tasks are retried; seeding and the full search pass are skipped.
 
         Args:
             start_date: First departure date.
             end_date: Last departure date.
             max_days_ahead: Hard cap on departure horizon from today.
+            continue_run: Resume by retrying failed tasks from an existing
+                database. ``start_date``/``end_date``/``max_days_ahead`` are
+                ignored and the DB must already hold search state.
         """
-        cutoff = date.today() + timedelta(days=max_days_ahead)
-        effective_end = min(end_date, cutoff)
+        tasks: list[SearchTask] = []
+        seed_rows: list[SeedRow] = []
+        if continue_run:
+            await self.repo.require_existing()
+            logger.info("Continue run: retrying failed tasks from existing state")
+        else:
+            cutoff = date.today() + timedelta(days=max_days_ahead)
+            effective_end = min(end_date, cutoff)
 
-        tasks, seed_rows = await self._build_tasks(start_date, effective_end)
+            tasks, seed_rows = await self._build_tasks(start_date, effective_end)
 
-        logger.info(
-            "Total tasks: %d across %d provider(s)", len(tasks), len(self.providers)
-        )
+            logger.info(
+                "Total tasks: %d across %d provider(s)",
+                len(tasks),
+                len(self.providers),
+            )
 
         proxy_task = asyncio.create_task(self.rotator.refresh())
         try:
             await self.repo.open()
-            purged = await self.repo.purge_abandoned_seeds()
-            if purged:
-                logger.info("Purged %d abandoned seed rows", purged)
-            await self.repo.insert_ignore_all(seed_rows)
+            if not continue_run:
+                purged = await self.repo.purge_abandoned_seeds()
+                if purged:
+                    logger.info("Purged %d abandoned seed rows", purged)
+                await self.repo.insert_ignore_all(seed_rows)
             await proxy_task
 
             if self.rotator.working_count() == 0:
@@ -541,12 +560,14 @@ class BulkSearchPipeline:
                     "Zero working proxies — refusing to run without proxy cover"
                 )
 
-            await self._run_batch(tasks, "Searching flights")
+            if not continue_run:
+                await self._run_batch(tasks, "Searching flights")
 
+            label = "Search complete" if not continue_run else "Continue pass"
             await self.repo.flush()
-            await self._log_counts("Search complete")
+            await self._log_counts(label)
 
-            await self._retry_loop()
+            await self._retry_loop(retry_all_failures=continue_run)
 
             await self.repo.flush()
             await self._log_counts("After retries")

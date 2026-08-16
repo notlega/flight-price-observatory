@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import sys
 from datetime import date, timedelta
 
 from collector import CollectorManager, ProviderRegistry
@@ -11,6 +12,7 @@ from collector.config import (
     DEFAULT_RATE,
     DEFAULT_WORKERS,
 )
+from collector.errors import RepositoryStateError
 
 
 def configure_parser(
@@ -52,6 +54,13 @@ def configure_parser(
         action="store_true",
         help="Keep SQLite state file after JSONL export (debug)",
     )
+    p.add_argument(
+        "--continue",
+        dest="continue_run",
+        action="store_true",
+        help="Retry only failed tasks from an existing database "
+        "(--start/--max-days ignored)",
+    )
     p.set_defaults(func=run)
 
 
@@ -60,7 +69,11 @@ def _ahead_days(end: date) -> int:
 
 
 def run(args: argparse.Namespace) -> None:
-    asyncio.run(_async_run(args))
+    try:
+        asyncio.run(_async_run(args))
+    except RepositoryStateError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 async def _async_run(args: argparse.Namespace) -> None:
@@ -77,4 +90,5 @@ async def _async_run(args: argparse.Namespace) -> None:
         rate=args.rate,
         workers=args.workers,
         keep_db=args.keep_db,
+        continue_run=args.continue_run,
     )

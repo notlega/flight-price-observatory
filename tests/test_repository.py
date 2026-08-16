@@ -6,7 +6,7 @@ import sqlite3
 import aiosqlite
 import pytest
 
-from collector.errors import ErrorType
+from collector.errors import ErrorType, RepositoryStateError
 from collector.repository import _RETRY_ERROR_TYPES, SearchRepository
 from collector.services.search_pipeline import _MAX_ATTEMPTS
 
@@ -224,6 +224,66 @@ async def test_get_failed_retry_round_boundaries(repo):
         "r1",
         "r2",
     }
+    assert {r[0] for r in await repo.get_failed(max_retries=None)} == {
+        "r0",
+        "r1",
+        "r2",
+        "r3",
+    }
+
+
+async def test_require_existing_missing_file_raises(tmp_path):
+    repository = SearchRepository(str(tmp_path / "missing.db"))
+    with pytest.raises(RepositoryStateError, match="no existing database"):
+        await repository.require_existing()
+
+
+async def test_require_existing_corrupt_file_raises(tmp_path):
+    path = tmp_path / "bad.db"
+    path.write_bytes(b"not a sqlite database at all")
+    repository = SearchRepository(str(path))
+    with pytest.raises(RepositoryStateError, match="invalid database"):
+        await repository.require_existing()
+
+
+async def test_require_existing_missing_schema_raises(tmp_path):
+    path = tmp_path / "noschema.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE other (id INTEGER)")
+    conn.commit()
+    conn.close()
+    repository = SearchRepository(str(path))
+    with pytest.raises(RepositoryStateError, match="invalid database schema"):
+        await repository.require_existing()
+
+
+async def test_require_existing_empty_db_raises(tmp_path):
+    path = tmp_path / "empty.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "CREATE TABLE search_results (route TEXT NOT NULL, dep_date TEXT NOT NULL, "
+        "return_date TEXT NOT NULL DEFAULT '', flight_type TEXT NOT NULL, "
+        "origin TEXT NOT NULL, destination TEXT NOT NULL, flights TEXT, "
+        "error_type TEXT, retries INTEGER DEFAULT 0, success BOOL DEFAULT 0, "
+        "searched_at TEXT, PRIMARY KEY (route, dep_date, return_date, flight_type))"
+    )
+    conn.commit()
+    conn.close()
+    repository = SearchRepository(str(path))
+    with pytest.raises(RepositoryStateError, match="empty database"):
+        await repository.require_existing()
+
+
+async def test_require_existing_valid_populated_db_passes(tmp_path):
+    path = tmp_path / "state.db"
+    repository = SearchRepository(str(path))
+    await repository.open()
+    await _upsert(repository, "r1", success=False, error_type="timeout")
+    await repository.flush()
+    await repository.close()
+
+    checker = SearchRepository(str(path))
+    await checker.require_existing()
 
 
 async def test_count_by_error(repo):

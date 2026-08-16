@@ -31,6 +31,7 @@ class CollectorManager:
         workers: int = DEFAULT_WORKERS,
         db_path: str = DEFAULT_DB_PATH,
         keep_db: bool = False,
+        continue_run: bool = False,
     ) -> None:
         """Collect flight prices for all providers over the date range.
 
@@ -43,6 +44,9 @@ class CollectorManager:
             workers: Concurrent search workers.
             db_path: SQLite database path for search state.
             keep_db: Keep the SQLite state file after JSONL export.
+            continue_run: Retry only previously failed tasks from the
+                existing database; ``start_date``/``end_date``/
+                ``max_days_ahead`` are ignored.
         """
         providers: list[BaseProvider] = [
             provider_class() for provider_class in self._registry.providers.values()
@@ -72,4 +76,5 @@ class CollectorManager:
             start_date=start_date,
             end_date=end_date,
             max_days_ahead=max_days_ahead,
+            continue_run=continue_run,
         )

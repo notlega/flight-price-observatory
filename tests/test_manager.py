@@ -56,4 +56,21 @@ async def test_run_forwards_args_to_pipeline():
         start_date=date(2026, 8, 1),
         end_date=date(2026, 8, 2),
         max_days_ahead=100,
+        continue_run=False,
+    )
+
+
+async def test_run_forwards_continue_flag():
+    with patch("collector.manager.BulkSearchPipeline") as pipeline_cls:
+        pipeline_cls.return_value.run = AsyncMock()
+        await CollectorManager(_Registry()).run(
+            date(2026, 8, 1),
+            date(2026, 8, 2),
+            continue_run=True,
+        )
+    pipeline_cls.return_value.run.assert_awaited_once_with(
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 2),
+        max_days_ahead=270,
+        continue_run=True,
     )

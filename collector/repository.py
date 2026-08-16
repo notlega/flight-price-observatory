@@ -10,7 +10,7 @@ from typing import Any, NamedTuple, cast
 
 import aiosqlite
 
-from collector.errors import ErrorType
+from collector.errors import ErrorType, RepositoryStateError
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,21 @@ _WRITE_BATCH_SIZE = 500
 _STOP = object()
 _FLUSH = object()
 
+_REQUIRED_COLUMNS = frozenset(
+    {
+        "route",
+        "dep_date",
+        "return_date",
+        "flight_type",
+        "origin",
+        "destination",
+        "flights",
+        "error_type",
+        "retries",
+        "success",
+    }
+)
+
 
 class SearchRepository:
     def __init__(self, db_path: str) -> None:
@@ -112,6 +127,44 @@ class SearchRepository:
             raise
         self._queue = asyncio.Queue()
         self._writer_task = asyncio.create_task(self._writer_loop())
+
+    async def require_existing(self) -> None:
+        """Validate that a usable search state exists for a continue run.
+
+        Read-only: never creates or modifies the database. Raises
+        :class:`RepositoryStateError` when the file is missing, not a valid
+        SQLite database, lacks the expected schema, or holds no rows.
+        """
+        db_path = Path(self._db_path)
+        if not db_path.is_file():
+            raise RepositoryStateError(
+                f"no existing database at {self._db_path} "
+                "(--continue requires a prior run)"
+            )
+        try:
+            probe = sqlite3.connect(self._db_path)
+            try:
+                probe.execute("SELECT 1")
+                cursor = probe.execute("PRAGMA table_info(search_results)")
+                columns = {row[1] for row in cursor.fetchall()}
+            finally:
+                probe.close()
+        except sqlite3.Error as e:
+            raise RepositoryStateError(
+                f"invalid database at {self._db_path}: {e}"
+            ) from e
+        if not _REQUIRED_COLUMNS.issubset(columns):
+            missing = sorted(_REQUIRED_COLUMNS - columns)
+            raise RepositoryStateError(
+                f"invalid database schema at {self._db_path}: missing columns {missing}"
+            )
+        async with aiosqlite.connect(self._db_path, isolation_level=None) as conn:
+            cursor = await conn.execute("SELECT COUNT(*) FROM search_results")
+            row = await cursor.fetchone()
+        if row is None or row[0] == 0:
+            raise RepositoryStateError(
+                f"empty database at {self._db_path}: no search state to continue"
+            )
 
     async def _migrate(self) -> None:
         cursor = await self._connection.execute("PRAGMA table_info(search_results)")
@@ -223,19 +276,31 @@ class SearchRepository:
             await self._connection.commit()
         return cursor.rowcount
 
-    async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:
+    async def get_failed(
+        self, max_retries: int | None = 3
+    ) -> list[tuple[str, str, str, str]]:
         """Return failed tasks retried at most ``max_retries`` attempts.
 
         ``retries`` stores cumulative attempts consumed (1-based), so a task
         that failed once per round carries ``retries = round * _MAX_ATTEMPTS``.
+        A ``None`` ``max_retries`` fetches every retryable failure regardless
+        of how many attempts were already consumed.
         """
         placeholders = ",".join("?" for _ in _RETRY_ERROR_TYPES)
-        cursor = await self._connection.execute(
-            "SELECT route, dep_date, return_date, flight_type "
-            f"FROM search_results WHERE success = 0 "
-            f"AND error_type IN ({placeholders}) AND retries <= ?",
-            (*_RETRY_ERROR_TYPES, max_retries),
-        )
+        if max_retries is None:
+            cursor = await self._connection.execute(
+                "SELECT route, dep_date, return_date, flight_type "
+                f"FROM search_results WHERE success = 0 "
+                f"AND error_type IN ({placeholders})",
+                _RETRY_ERROR_TYPES,
+            )
+        else:
+            cursor = await self._connection.execute(
+                "SELECT route, dep_date, return_date, flight_type "
+                f"FROM search_results WHERE success = 0 "
+                f"AND error_type IN ({placeholders}) AND retries <= ?",
+                (*_RETRY_ERROR_TYPES, max_retries),
+            )
         rows = await cursor.fetchall()
         return [(r[0], r[1], r[2], r[3]) for r in rows]
 

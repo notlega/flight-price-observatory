@@ -90,6 +90,8 @@ class FakeRepo:
         self.success_count = 0
         self.failed_count = 0
         self.inserted: list[tuple] = []
+        self.purged_calls = 0
+        self.require_existing_called = False
 
     async def open(self):
         pass
@@ -99,6 +101,9 @@ class FakeRepo:
 
     async def close(self):
         pass
+
+    async def require_existing(self):
+        self.require_existing_called = True
 
     async def upsert(
         self,
@@ -135,6 +140,7 @@ class FakeRepo:
         self.inserted.extend(tasks)
 
     async def purge_abandoned_seeds(self) -> int:
+        self.purged_calls += 1
         return 0
 
     async def get_failed(self, max_retries: int = 3) -> list[tuple[str, str, str, str]]:

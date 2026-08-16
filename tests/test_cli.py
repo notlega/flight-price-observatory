@@ -76,9 +76,23 @@ def test_search_run_wraps_async(monkeypatch):
             rate=None,
             workers=None,
             keep_db=None,
+            continue_run=False,
         )
     )
     fake.assert_awaited_once()
+
+
+def test_search_run_repository_state_error_exits_1(monkeypatch, capsys):
+    from collector.errors import RepositoryStateError
+
+    async def boom(*args, **kwargs):
+        raise RepositoryStateError("no existing database")
+
+    monkeypatch.setattr("cli.search._async_run", boom)
+    with pytest.raises(SystemExit) as exc:
+        search_run(argparse.Namespace())
+    assert exc.value.code == 1
+    assert "error: no existing database" in capsys.readouterr().err
 
 
 @pytest.mark.asyncio
@@ -93,6 +107,7 @@ async def test_search_async_run_forwards_args():
         rate=10.0,
         workers=5,
         keep_db=True,
+        continue_run=True,
     )
     with (
         patch("cli.search.CollectorManager", return_value=manager),
@@ -108,6 +123,7 @@ async def test_search_async_run_forwards_args():
         rate=10.0,
         workers=5,
         keep_db=True,
+        continue_run=True,
     )
     registry.assert_called_once()
 
