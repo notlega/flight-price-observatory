@@ -1,6 +1,6 @@
 # Flight Price Observatory
 
-Auto-collect, store, analyse historical airfare data. SIN -> 13 Asian destinations. Build longitudinal dataset for trend analysis + ML.
+Auto-collect, store, analyse historical airfare data. SIN -> 15 Asian destinations. Build longitudinal dataset for trend analysis + ML.
 
 Unlike normal flight search (show current price), this snapshots prices over time -> spot patterns across booking windows, seasons, airlines, routes.
 
@@ -23,7 +23,7 @@ Unlike normal flight search (show current price), this snapshots prices over tim
 
 **Scalable pipeline.** Modular ingestion + validation + storage. Modern data engineering.
 
-**Cloud data lake.** Raw + processed datasets in private R2 bucket. Immutable, queryable, versioned.
+**Cloud data lake.** Raw bundles in GitHub Releases (bronze), processed Parquet in Cloudflare R2 (silver). Immutable, queryable, versioned.
 
 **Exploratory analysis.** Price trends, seasonal patterns, airline comparison, booking window behaviour.
 
@@ -35,11 +35,11 @@ Unlike normal flight search (show current price), this snapshots prices over tim
 
 Six layers:
 
-**Scheduler.** (Planned) GitHub Actions cron trigger — no manual intervention.
+**Scheduler.** GitHub Actions cron, 4-day cycle at 05:30 SGT (see [ADR-0006](docs/decisions/0006-scheduling.md)). No manual intervention.
 
-**Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK). Swap or add providers without touching pipeline.
+**Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS). Swap or add providers without touching pipeline.
 
-**Routes.** `RouteCatalog` (`collector/routes.py`) defines 13 destinations out of SIN. Each date in the search window generates 26 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per route (return offsets 7, 14, 21 days) — up to 4 searches per route/date.
+**Routes.** `RouteCatalog` (`collector/routes.py`) defines 15 destinations out of SIN. Each date in the search window generates 30 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per SIN-origin route (return offsets 7, 14, 21 days) — 75 searches per route/date, 20,325 per full 271-day window.
 
 > **Midnight caveat.** Runs crossing midnight keep only future dates after rollover: a run started 23:50 builds today's tasks, which become invalid at 00:00 and fail as `DATA` (no proxy blame); any rebuild after rollover skips past dates entirely. Past dates are unsearchable by definition — losing up to a day at the boundary is by design.
 
@@ -56,18 +56,19 @@ flowchart TD
     PIPE --> RL["RateLimiter<br/>adaptive token bucket, halve on 429 burst, double on clean 60s"]
     PIPE --> SQL["SQLite aiosqlite<br/>upsert intermediary, track retries"]
     PIPE --> RETRY["Retry loop x3<br/>cumulative attempt budget (retries <= r x 3)"]
-    PIPE --> CONV["Convert to JSONL<br/>write, delete SQLite DB"]
+    SQL --> CONV["cli convert<br/>SQLite -> JSONL, DB retained"]
 
-    SQL --> CONV
     CONV --> OUT["storage/raw/search_YYYYMMDD_HHMMSS.jsonl"]
-    OUT -. future .-> R2["gzip -> R2 bronze"]
+    OUT --> GZ["gzip -> cycle GitHub Release (bronze)"]
+    OUT --> TF["cli transform<br/>DuckDB -> Parquet silver"]
+    TF --> R2["R2 (silver)"]
 ```
 
 Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/design.md), [docs/data-model.md](docs/data-model.md).
 
 **Validation + transformation.** Schema validation, type checking, dedup, normalisation, enrichment. Separate raw from processed.
 
-**Data lake.** R2 buckets: bronze (raw gzipped JSONL) -> silver (cleaned Parquet) -> gold (aggregated analytics). Immutable raw tier enables reprocessing.
+**Data lake.** Bronze: one GitHub Release per cycle (`bronze-YYYYMMDD`, tag `cycle-YYYYMMDD`) carrying the gzipped JSONL bundle from each of the 4 runs. Silver: Parquet (Hive-partitioned by route) uploaded to R2. Gold (aggregated analytics) later. Immutable raw tier enables reprocessing.
 
 **Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis.
 
@@ -79,13 +80,13 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 |-----------------|-------------------|---------------------------------------------|
 | Language        | Python 3.14+      | One language, entire stack                  |
 | HTTP            | curl_cffi         | TLS fingerprint spoofing, browser impersonation |
-| Proxy fetch     | httpx             | Pull proxy lists from 64 sources            |
+| Proxy fetch     | httpx             | Pull proxy lists from 15 high-yield sources |
 | SQLite          | aiosqlite         | Async intermediary storage, upsert + retry  |
 | Flights API     | fli               | Google Flights internal API wrapper         |
 | Progress        | log lines         | Periodic %/rate/ETA progress in logs       |
 | Scheduler       | GitHub Actions    | Cron, no infra                              |
 | Package mgmt    | uv                | Fast, reproducible                          |
-| Testing         | pytest + ruff + basedpyright + coverage | 289 tests, 97% cov |
+| Testing         | pytest + ruff + basedpyright + coverage | 338 tests, 97% cov |
 | Storage         | Cloudflare R2     | S3-compatible, free 10 GB, pay after        |
 | Query           | DuckDB            | SQL over Parquet, no server                 |
 | Viz             | Streamlit + Plotly| (Future) interactive dashboard              |
@@ -95,8 +96,8 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 ```
 flight-price-observatory/
 +-- .github/
-|   +-- workflows/          # (planned) CI: lint + test + coverage gate
-+-- cli/                    # CLI entry points (search, convert)
+|   +-- workflows/          # ci.yml (lint + test), collect.yml (scheduled collection)
++-- cli/                    # CLI entry points (search, convert, transform, publish)
 +-- collector/              # core package: providers, services, models
 |   +-- providers/          #   one dir per flight data source (BaseProvider)
 |   +-- services/           #   pipeline + rate limiter
@@ -123,7 +124,7 @@ Core collection logic. Provider-agnostic pipeline. New provider = new file under
 
 ### storage/
 
-`raw/` -- final JSONL output. `db/` -- transient SQLite state, deleted after JSONL produced.
+`raw/` -- final JSONL output. `db/` -- SQLite search state (always kept; retries/`--continue` read it). `silver/` -- Parquet output of `cli transform`.
 
 ## Getting Started
 
@@ -163,11 +164,18 @@ uv run python -m cli search --currency USD --rate 5 --workers 10
 uv run python -m cli -v search
 uv run python -m cli search --verbose
 
-# Convert existing SQLite to JSONL (default: delete DB after)
+# Convert existing SQLite state to JSONL (DB is always kept)
 uv run python -m cli convert
 
-# Keep the SQLite DB after conversion
-uv run python -m cli convert --keep-db
+# Convert a specific state file
+uv run python -m cli convert storage/db/search_state.db --output /tmp/out.jsonl
+
+# Transform raw JSONL to Parquet (silver), Hive-partitioned by route
+uv run python -m cli transform --input storage/raw/search_20260817_040546.jsonl
+
+# Publish silver to Cloudflare R2 (env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+# R2_SECRET_ACCESS_KEY, R2_BUCKET)
+uv run python -m cli publish
 
 # Run tests + lint
 uv run pytest
@@ -183,26 +191,38 @@ uv run lint
 | `--currency`| SGD     | Currency code for pricing |
 | `--rate`    | 200     | Requests per second  |
 | `--workers` | 50     | Max concurrent searches |
-| `--keep-db` | False   | Keep SQLite state file after JSONL export |
+| `--continue`| False   | Retry only failed tasks from the existing DB (`--start`/`--max-days` ignored) |
 | `-v`        | False   | Debug logging (global, also after subcommand) |
 
 `convert` flags:
 
 | Flag        | Default | Description          |
 |-------------|---------|----------------------|
-| `--db`      | `storage/db/search_state.db` | SQLite state file |
+| `db` (positional) | `storage/db/search_state.db` | SQLite state file |
 | `--output`  | auto    | Output JSONL path (`storage/raw/search_YYYYMMDD_HHMMSS.jsonl`) |
-| `--keep-db` | False   | Keep SQLite file after conversion (default: delete) |
+
+`transform` flags:
+
+| Flag        | Default | Description          |
+|-------------|---------|----------------------|
+| `--input`   | latest `storage/raw/search_*.jsonl` | Raw JSONL path |
+| `--output`  | `storage/silver/<timestamp>` | Parquet output directory |
+
+`publish` flags:
+
+| Flag        | Default | Description          |
+|-------------|---------|----------------------|
+| `--input`   | `storage/silver` | Parquet directory to upload |
 
 ## Roadmap
 
 - [x] Provider abstraction layer
 - [x] Automated data collection with proxy rotation
 - [x] SQLite intermediary + retry loop
-- [x] Google Flights provider (13 SIN<->Asia routes)
-- [ ] Adaptive collection schedule (daily 0-30d, weekly 31-90d, etc.)
-- [ ] R2 upload with gzip compression
-- [ ] Bronze->silver Parquet transformation
+- [x] Google Flights provider (15 SIN<->Asia routes)
+- [x] Adaptive collection schedule (4-day cycle: full 0-270d, then 0-30d/0-60d/0-90d — see ADR-0006)
+- [x] Bronze bundles in GitHub Releases (gzip) + R2 upload of silver Parquet
+- [x] Bronze->silver Parquet transformation (DuckDB)
 - [ ] DuckDB analytical queries
 - [ ] Interactive dashboard
 - [ ] Price forecasting ML models

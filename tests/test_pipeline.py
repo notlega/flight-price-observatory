@@ -1,7 +1,7 @@
 import logging
 from datetime import date, timedelta
 from typing import Any, cast
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fli.models import Airport
@@ -678,10 +678,7 @@ async def test_run_max_days_ahead_zero_limits_to_today(tmp_path):
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     pipeline.db_path = str(tmp_path / "state.db")
     today = date.today()
-    with (
-        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()),
-    ):
+    with patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession):
         await pipeline.run(
             today - timedelta(days=5), today + timedelta(days=10), max_days_ahead=0
         )
@@ -695,15 +692,11 @@ async def test_run_max_days_ahead_negative_builds_no_tasks(tmp_path):
     repo = FakeRepo()
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     pipeline.db_path = str(tmp_path / "state.db")
-    with (
-        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
-    ):
+    with patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession):
         await pipeline.run(date.today(), date.today(), max_days_ahead=-1)
     assert repo.inserted == []
     assert repo.upserts == []
     assert rotator.refreshes == []
-    convert.assert_not_awaited()
 
 
 async def test_retry_loop_stops_when_nothing_failed():
@@ -754,15 +747,11 @@ async def test_run_empty_task_window_noop(tmp_path, start, end):
     repo = FakeRepo()
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     pipeline.db_path = str(tmp_path / "state.db")
-    with (
-        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
-    ):
+    with patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession):
         await pipeline.run(start, end, max_days_ahead=330)
     assert repo.inserted == []
     assert repo.upserts == []
     assert rotator.refreshes == []
-    convert.assert_not_awaited()
 
 
 async def test_run_preflight_refreshes_when_no_proxies(tmp_path):
@@ -773,7 +762,6 @@ async def test_run_preflight_refreshes_when_no_proxies(tmp_path):
     pipeline.db_path = str(tmp_path / "state.db")
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()),
         pytest.raises(RuntimeError, match="refusing to run"),
     ):
         await pipeline.run(date(2026, 12, 1), date(2026, 12, 1), max_days_ahead=330)
@@ -790,7 +778,6 @@ async def test_run_orchestrates_end_to_end(tmp_path):
 
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
         patch("collector.services.search_pipeline.date") as fake_date,
     ):
         fake_date.today.return_value = date(2026, 8, 1)
@@ -805,40 +792,6 @@ async def test_run_orchestrates_end_to_end(tmp_path):
     ]
     assert rotator.refreshes == [(False, None)]
     assert all(r["success"] is True for r in repo.upserts)
-    convert.assert_awaited_once_with(
-        str(tmp_path / "state.db"),
-        ANY,
-        delete=True,
-    )
-
-
-async def test_run_keep_db_preserves_state(tmp_path):
-    provider = FakeProvider(script=[make_flights(100)] * 4)
-    rotator = FakeRotator(proxies=[make_proxy()], working=1)
-    repo = FakeRepo()
-    repo.success_count = 1
-    pipeline = _make_pipeline(
-        provider=provider,
-        rotator=rotator,
-        repo=repo,
-        keep_db=True,
-    )
-    pipeline.db_path = str(tmp_path / "state.db")
-
-    with (
-        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
-        patch("collector.services.search_pipeline.date") as fake_date,
-    ):
-        fake_date.today.return_value = date(2026, 8, 1)
-        fake_date.side_effect = lambda *a, **k: date(*a, **k)
-        await pipeline.run(date(2026, 8, 1), date(2026, 8, 1), max_days_ahead=330)
-
-    convert.assert_awaited_once_with(
-        str(tmp_path / "state.db"),
-        ANY,
-        delete=False,
-    )
 
 
 async def test_run_skips_past_dates(tmp_path):
@@ -850,7 +803,6 @@ async def test_run_skips_past_dates(tmp_path):
     pipeline.db_path = str(tmp_path / "state.db")
     with (
         patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()),
         patch("collector.services.search_pipeline.date") as fake_date,
     ):
         fake_date.today.return_value = date(2026, 8, 3)
@@ -882,10 +834,7 @@ async def test_run_continue_skips_seeding_and_retries_failures(tmp_path):
     pipeline = _make_pipeline(provider=provider, rotator=rotator, repo=repo)
     pipeline.db_path = str(tmp_path / "state.db")
 
-    with (
-        patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession),
-        patch("collector.services.search_pipeline.convert", new=AsyncMock()) as convert,
-    ):
+    with patch("collector.services.search_pipeline.AsyncSession", new=FakeCurlSession):
         await pipeline.run(
             date(2026, 8, 1),
             date(2026, 8, 1),
@@ -900,11 +849,6 @@ async def test_run_continue_skips_seeding_and_retries_failures(tmp_path):
     assert since_calls and all(s == date.today().isoformat() for s in since_calls)
     assert repo.upserts
     assert all(r["success"] is True for r in repo.upserts)
-    convert.assert_awaited_once_with(
-        str(tmp_path / "state.db"),
-        ANY,
-        delete=True,
-    )
 
 
 async def test_run_batch_mid_round_refresh_respects_cooldown():

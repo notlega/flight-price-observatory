@@ -6,11 +6,11 @@ Six layers, one Python codebase.
 
 | Layer | Responsibility | Implementation |
 |-------|----------------|----------------|
-| Scheduler | Periodic trigger | (planned) GitHub Actions cron |
+| Scheduler | Periodic trigger | GitHub Actions cron, 4-day cycle 05:30 SGT (ADR-0006) |
 | Collection | Provider-agnostic search | `BulkSearchPipeline` |
 | Validation/transformation | Schema, dedup, normalise | `collector/convert.py` |
-| Data lake | Immutable raw tier | (future) R2 bronze |
-| Analytics | SQL over Parquet | (future) DuckDB |
+| Data lake | Raw bundles + processed tier | bronze: GitHub Releases; silver: R2 Parquet |
+| Analytics | SQL over Parquet | DuckDB |
 | Presentation | Interactive dashboard | (future) Streamlit + Plotly |
 
 ## Collection pipeline
@@ -50,7 +50,7 @@ flowchart TD
    - `provider.search(...)`, map exceptions to `AttemptResult`.
 5. Success -> `_store_result()` -> `repository.upsert()`. Failure -> `_record_failure()` stores the attempt count (1-based, up to 3 per round).
 6. `_retry_loop(3)` re-runs failures, distributing them round-robin across providers. Round *r* selects rows with `retries <= r * 3` (see [design.md](design.md#retry-semantics)); routes no provider covers are skipped with a WARNING.
-7. `convert()` writes SQLite -> JSONL, then deletes the DB (unless `--keep-db`).
+7. The run ends with the SQLite state file retained. JSONL export is a separate explicit step: `cli convert storage/db/search_state.db`. The DB is the operational source of truth (retry state, `--continue`); JSONL is the raw archive. See [ADR-0006](decisions/0006-scheduling.md) for how the scheduled workflow chains search -> convert -> gzip/release -> transform -> R2.
 
 ### Rate limiting
 
@@ -76,7 +76,7 @@ Adaptive token bucket (`collector/services/rate_limiter.py`):
 - Intermediary: SQLite via `aiosqlite`, WAL journal, async write queue with batching, flush/stop sentinels.
 - `open()` validates the file with a synchronous `sqlite3` probe before spawning the aiosqlite worker thread — corrupt/unreadable DB fails fast (`DatabaseError`) instead of leaking the worker thread.
 - `flush()`/`close()` await the writer only after the batch is committed (`task_done()` fires post-commit), so callers never read pre-commit state.
-- Final: JSONL in `storage/raw/`, one line per successful route search. Flights embedded as JSON string.
+- Final: JSONL in `storage/raw/`, one line per successful route search. Flights embedded as JSON string. The SQLite DB is retained (retry state, `--continue`); `cli convert` exports it on demand and never deletes it.
 
 See [data-model.md](data-model.md).
 
@@ -87,5 +87,6 @@ See [data-model.md](data-model.md).
 - ADR-0003 provider abstraction
 - ADR-0004 proxy reliability hardening
 - ADR-0005 pipeline hardening (retries, CLI, persistence)
+- ADR-0006 scheduling and storage (4-day cycle, bronze releases, silver R2, CLI model)
 
 Full records: [docs/decisions/](decisions/)

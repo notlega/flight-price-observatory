@@ -25,4 +25,4 @@ Reliability passes exposed several correctness issues:
 
 - `get_failed()` is the single retry entry point with a monotonic budget; no per-error-type exceptions.
 - Tests pin boundaries: flush sizes (499/500/501, 999/1000/1001), threshold at 19/20 working proxies, retry escalation `[3, 6, 9]`.
-- 289 tests, 97% coverage, `fail_under = 80` gate.
+- 338 tests, 97% coverage, `fail_under = 80` gate.

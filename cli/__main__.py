@@ -25,10 +25,14 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     from cli.convert import configure_parser as configure_convert
+    from cli.publish import configure_parser as configure_publish
     from cli.search import configure_parser as configure_search
+    from cli.transform import configure_parser as configure_transform
 
     configure_search(subparsers)
     configure_convert(subparsers)
+    configure_transform(subparsers)
+    configure_publish(subparsers)
 
     args = parser.parse_args()
     _configure_logging(args.verbose)

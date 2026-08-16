@@ -30,7 +30,6 @@ class CollectorManager:
         rate: float = DEFAULT_RATE,
         workers: int = DEFAULT_WORKERS,
         db_path: str = DEFAULT_DB_PATH,
-        keep_db: bool = False,
         continue_run: bool = False,
     ) -> None:
         """Collect flight prices for all providers over the date range.
@@ -42,8 +41,8 @@ class CollectorManager:
             currency: Currency for returned prices.
             rate: Max requests per second across the pipeline.
             workers: Concurrent search workers.
-            db_path: SQLite database path for search state.
-            keep_db: Keep the SQLite state file after JSONL export.
+            db_path: SQLite database path for search state (always kept;
+                export to JSONL with ``cli convert``).
             continue_run: Retry only previously failed tasks from the
                 existing database; ``start_date``/``end_date``/
                 ``max_days_ahead`` are ignored.
@@ -70,7 +69,6 @@ class CollectorManager:
             max_concurrent=workers,
             db_path=db_path,
             currency=currency,
-            keep_db=keep_db,
         )
         await pipeline.run(
             start_date=start_date,

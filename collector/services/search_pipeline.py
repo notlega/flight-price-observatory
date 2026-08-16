@@ -17,7 +17,6 @@ from collector.config import (
     DEFAULT_RATE,
     DEFAULT_WORKERS,
 )
-from collector.convert import convert, default_output_path
 from collector.errors import (
     ErrorType,
     ProviderBlockedError,
@@ -98,7 +97,6 @@ class BulkSearchPipeline:
         max_concurrent: int = DEFAULT_WORKERS,
         db_path: str = DEFAULT_DB_PATH,
         currency: str = DEFAULT_CURRENCY,
-        keep_db: bool = False,
     ):
         self.providers = providers
         self.rotator = ProxyRotator()
@@ -107,7 +105,6 @@ class BulkSearchPipeline:
         self.repo = SearchRepository(db_path)
         self.db_path = db_path
         self.currency = currency
-        self.keep_db = keep_db
         self._mid_refresh = False
         self._last_mid_refresh = float("-inf")
 
@@ -520,9 +517,11 @@ class BulkSearchPipeline:
         """Run the bulk search lifecycle.
 
         Builds tasks, seeds the DB, refreshes the proxy pool, executes
-        batches, retries transient failures, then exports to JSONL. With
-        ``continue_run`` the existing DB is reused and only previously failed
-        tasks are retried; seeding and the full search pass are skipped.
+        batches and retries transient failures. The SQLite state file is
+        always retained; export to JSONL is a separate step
+        (``cli convert storage/db/search_state.db``). With ``continue_run``
+        the existing DB is reused and only previously failed tasks are
+        retried; seeding and the full search pass are skipped.
 
         Args:
             start_date: First departure date.
@@ -589,11 +588,8 @@ class BulkSearchPipeline:
             await self._log_counts("After retries")
             await self._log_failure_breakdown()
 
-            output_path = default_output_path()
             await self.repo.close()
-            await convert(self.db_path, output_path, delete=not self.keep_db)
-
-            logger.info("Output: %s", output_path)
+            logger.info("State retained in %s (export via: cli convert)", self.db_path)
         finally:
             if not proxy_task.done():
                 proxy_task.cancel()

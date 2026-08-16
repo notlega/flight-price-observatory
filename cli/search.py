@@ -50,11 +50,6 @@ def configure_parser(
         help=f"Max concurrent searches (default: {DEFAULT_WORKERS})",
     )
     p.add_argument(
-        "--keep-db",
-        action="store_true",
-        help="Keep SQLite state file after JSONL export (debug)",
-    )
-    p.add_argument(
         "--continue",
         dest="continue_run",
         action="store_true",
@@ -89,6 +84,5 @@ async def _async_run(args: argparse.Namespace) -> None:
         currency=args.currency,
         rate=args.rate,
         workers=args.workers,
-        keep_db=args.keep_db,
         continue_run=args.continue_run,
     )

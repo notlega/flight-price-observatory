@@ -41,7 +41,7 @@ def _jsonl_row(row: dict[str, Any]) -> str:
 
 
 async def convert(
-    db_path: str, output_path: str | None = None, delete: bool = True
+    db_path: str, output_path: str | None = None, delete: bool = False
 ) -> str:
     if output_path is None:
         output_path = default_output_path()
