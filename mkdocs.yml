@@ -1,0 +1,55 @@
+site_name: Flight Price Observatory
+site_url: https://flights-docs.hinjourn.com
+repo_url: https://github.com/hinjourn/flight-price-observatory
+repo_name: hinjourn/flight-price-observatory
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Data Model: data-model.md
+  - Design: design.md
+  - ADRs:
+    - 0001 - Cloudflare R2: decisions/0001-cloudflare-r2.md
+    - 0002 - Parquet: decisions/0002-parquet.md
+    - 0003 - Provider Abstraction: decisions/0003-provider-abstraction.md
+    - 0004 - Proxy Reliability: decisions/0004-proxy-reliability.md
+    - 0005 - Pipeline Hardening: decisions/0005-pipeline-hardening.md
+    - 0006 - Scheduling: decisions/0006-scheduling.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
