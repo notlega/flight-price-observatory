@@ -1,0 +1,52 @@
+name: Bug Report
+description: Report a bug in the CLI, collector, or workflows
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Run `uv run search SIN NRT`
+        2. Wait for collection to start
+        3. See error...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened?
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Local CLI
+        - GitHub Actions
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: CLI command
+      description: If applicable, the command that triggered the bug
+      placeholder: "uv run search SIN NRT"

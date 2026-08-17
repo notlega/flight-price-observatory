@@ -1,0 +1,29 @@
+name: Documentation
+description: Report docs issues or suggest improvements
+labels: ["documentation"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page/section
+      description: Which doc page?
+      placeholder: "docs/architecture.md"
+  - type: dropdown
+    id: type
+    attributes:
+      label: Issue type
+      options:
+        - Typo
+        - Missing info
+        - Outdated
+        - Broken link
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What's wrong or missing?
+    validations:
+      required: true
