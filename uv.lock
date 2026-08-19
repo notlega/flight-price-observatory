@@ -401,7 +401,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "boto3", specifier = ">=1.38.0" },
     { name = "duckdb", specifier = ">=1.4.0" },
-    { name = "flights", specifier = ">=0.9.0" },
+    { name = "flights", git = "https://github.com/olivierbarbosa/fli?rev=fix%2Fwire-framing-and-error-envelope" },
 ]
 
 [package.metadata.requires-dev]
@@ -418,8 +418,8 @@ dev = [
 
 [[package]]
 name = "flights"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.10.0"
+source = { git = "https://github.com/olivierbarbosa/fli?rev=fix%2Fwire-framing-and-error-envelope#6bd5e5a2333f1b7bd89ffa125ce902d26ae8200e" }
 dependencies = [
     { name = "babel" },
     { name = "curl-cffi" },
@@ -430,10 +430,6 @@ dependencies = [
     { name = "ratelimit" },
     { name = "tenacity" },
     { name = "typer" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/dd/47a9eb94ca786a774b2e8121a9a4d160caa3afe76bd11609aa0a08dc7cc0/flights-0.9.0.tar.gz", hash = "sha256:fdef6cd892482fbc17171450d6eb51341f48ad10528c4f71fe97677afb0f0533", size = 11278056, upload-time = "2026-05-21T05:56:10.735Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/9e/6e22650251d423e91cb204b62c596d36c36b063f58801e83b0679d2e26a9/flights-0.9.0-py3-none-any.whl", hash = "sha256:77a7cf2a2d8324706edd2bf1fc320fc9165d51ab059275b13f858475defd9beb", size = 188177, upload-time = "2026-05-21T05:56:08.673Z" },
 ]
 
 [[package]]

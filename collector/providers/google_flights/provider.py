@@ -203,7 +203,7 @@ class GoogleFlightsProvider(BaseProvider):
 
         try:
             flights_raw = _extract_flights_raw(inner)
-        except IndexError, TypeError:
+        except (IndexError, TypeError):
             logger.warning(
                 "Malformed flights page %s: status=%s len=%s",
                 _search_context(filters),

@@ -102,6 +102,9 @@ jobs:
           path: storage/db/search_state.db
           key: ${{ env.CYCLE_TAG }}-search-state
 
+      - name: Ensure storage/raw exists
+        run: mkdir -p storage/raw
+
       - name: Export to JSONL
         id: convert
         run: |
