@@ -54,6 +54,7 @@ def run(args: argparse.Namespace) -> None:
 
     input_path = args.input or _latest_jsonl()
     output = args.output or f"{DEFAULT_SILVER_DIR}/{datetime.now():%Y%m%d_%H%M%S}"
+    Path(output).mkdir(parents=True, exist_ok=True)
 
     con = duckdb.connect()
     try:

@@ -3,6 +3,7 @@
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from collector.models.flight_result import SearchResultRow
 from collector.repository import SearchRepository
@@ -70,6 +71,7 @@ async def convert(
 
     written = 0
     buffer: list[str] = []
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     try:
         with open(output_path, "w") as f:
             async for row in repo.iter_successful_raw():
