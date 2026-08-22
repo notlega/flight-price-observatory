@@ -218,17 +218,17 @@ uv run lint
 
 ## Roadmap
 
-- [x] Provider abstraction layer
-- [x] Automated data collection with proxy rotation
-- [x] SQLite intermediary + retry loop
-- [x] Google Flights provider (15 SIN<->Asia routes)
-- [x] Adaptive collection schedule (4-day cycle: full 0-270d, then 0-30d/0-60d/0-90d — see ADR-0006)
-- [x] Bronze bundles in GitHub Releases (gzip) + R2 upload of silver Parquet
-- [x] Bronze->silver Parquet transformation (DuckDB)
-- [ ] DuckDB analytical queries
-- [ ] Interactive dashboard
-- [ ] Price forecasting ML models
-- [ ] Additional providers
+- [x] Provider abstraction layer ([@notlega](https://github.com/notlega))
+- [x] Automated data collection with proxy rotation ([@notlega](https://github.com/notlega))
+- [x] SQLite intermediary + retry loop ([@notlega](https://github.com/notlega))
+- [x] Google Flights provider (15 SIN<->Asia routes) ([@notlega](https://github.com/notlega))
+- [x] Adaptive collection schedule (4-day cycle: full 0-270d, then 0-30d/0-60d/0-90d — see ADR-0006) ([@notlega](https://github.com/notlega))
+- [x] Bronze bundles in GitHub Releases (gzip) + R2 upload of silver Parquet ([@notlega](https://github.com/notlega))
+- [x] Bronze->silver Parquet transformation (DuckDB) ([@notlega](https://github.com/notlega))
+- [ ] DuckDB analytical queries ([@josephyqf](https://github.com/josephyqf))
+- [ ] Interactive dashboard ([@josephyqf](https://github.com/josephyqf))
+- [ ] Price forecasting ML models ([@josephyqf](https://github.com/josephyqf))
+- [ ] Additional providers ([@notlega](https://github.com/notlega))
 
 ## Contributing
 
