@@ -83,9 +83,6 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 | Proxy fetch     | httpx             | Pull proxy lists from 15 high-yield sources |
 | SQLite          | aiosqlite         | Async intermediary storage, upsert + retry  |
 | Flights API     | fli               | Google Flights internal API wrapper         |
-
-> **Note:** `fli` v0.9.0 has a parser bug ([#223](https://github.com/punitarani/fli/issues/223)) causing zero flights on routes with accented characters. Pinned to [PR #224 branch](https://github.com/punitarani/fli/pull/224). Monitor upstream for merge — switch back to PyPI release when available.
-
 | Progress        | log lines         | Periodic %/rate/ETA progress in logs       |
 | Scheduler       | GitHub Actions    | Cron, no infra                              |
 | Package mgmt    | uv                | Fast, reproducible                          |
@@ -93,6 +90,8 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 | Storage         | Cloudflare R2     | S3-compatible, free 10 GB, pay after        |
 | Query           | DuckDB            | SQL over Parquet, no server                 |
 | Viz             | Streamlit + Plotly| (Future) interactive dashboard              |
+
+> **Note:** `fli` v0.9.0 has a parser bug ([#223](https://github.com/punitarani/fli/issues/223)) causing zero flights on routes with accented characters. Pinned to [PR #224 branch](https://github.com/punitarani/fli/pull/224). Monitor upstream for merge — switch back to PyPI release when available.
 
 ## Project Structure
 
