@@ -55,6 +55,45 @@ One line per successful route search:
 
 Output of `GoogleFlightsProvider.search()`, from `fli` lib `parse_flight_row(...).model_dump(mode="json")`. Fields per the `fli` `Flight` model (price, airline, departure/arrival times, stops, etc.). Pipelines treat flight dicts as opaque JSON.
 
+## Silver tier (Parquet on R2)
+
+Optimised Parquet files stored in Cloudflare R2, partitioned by route.
+
+### Schema
+
+| Column | Type | Partition | Notes |
+|--------|------|-----------|-------|
+| `origin` | VARCHAR(3) | Yes | IATA code (SIN) |
+| `destination` | VARCHAR(3) | Yes | IATA code (KUL) |
+| `dep_date` | DATE | Yes | ISO date |
+| `return_date` | DATE | No | NULL for one-way |
+| `flight_type` | VARCHAR(9) | No | ONE_WAY / ROUND_TRIP |
+| `searched_at` | TIMESTAMP | No | UTC timestamp |
+| `price` | FLOAT | No | NULL if unknown |
+| `currency` | VARCHAR(3) | No | SGD, USD, etc. |
+| `duration_minutes` | INT | No | Total flight duration |
+| `stops` | INT | No | Number of stops |
+| `airline` | VARCHAR(3) | No | Primary airline code |
+| `airline_name` | VARCHAR | No | Full airline name |
+| `co2_emissions_g` | INT | No | NULL if unknown |
+| `emissions_tag` | VARCHAR(6) | No | lower/typical/higher |
+| `booking_token` | VARCHAR | No | For future booking lookup |
+
+### Partition strategy
+
+`origin/destination`
+- Query: "SIN→KUL" → reads 1 partition
+- ~156 partitions max (15 destinations × 10+ origins)
+
+### Compression
+
+zstd (default Parquet) — expect 10-20x reduction from JSONL
+
+### Dashboard access
+
+DuckDB WASM reads Parquet directly from R2 via HTTP range requests.
+R2 is private; Cloudflare Worker proxy handles CORS + Range headers.
+
 ## Proxy cache (`storage/proxy_cache.json`)
 
 Persisted `(timestamp, [ProxyInfo dicts])`. Each proxy: `url`, `protocol`, `quality_score`, `latency_ms`, `last_validated`. Fresh for 30 min, revalidated up to 24 h; `refresh(force=True)` bypasses.

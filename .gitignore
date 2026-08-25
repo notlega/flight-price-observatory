@@ -354,4 +354,9 @@ storage/raw/
 storage/db/
 storage/proxy_cache.json
 
+# One-time scripts (do NOT commit)
+scripts/scan_r2.py
+scripts/backfill.py
+scripts/optimize_r2.py
+
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,pythonvanilla,venv,pycharm

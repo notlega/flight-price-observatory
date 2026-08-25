@@ -11,7 +11,7 @@ Six layers, one Python codebase.
 | Validation/transformation | Schema, dedup, normalise | `collector/convert.py` |
 | Data lake | Raw bundles + processed tier | bronze: GitHub Releases; silver: R2 Parquet |
 | Analytics | SQL over Parquet | DuckDB |
-| Presentation | Interactive dashboard | (future) Streamlit + Plotly |
+| Presentation | Interactive dashboard | DuckDB WASM + Cloudflare Pages + Worker proxy |
 
 ## Collection pipeline
 
@@ -79,6 +79,43 @@ Adaptive token bucket (`collector/services/rate_limiter.py`):
 - Final: JSONL in `storage/raw/`, one line per successful route search. Flights embedded as JSON string. The SQLite DB is retained (retry state, `--continue`); `cli convert` exports it on demand and never deletes it.
 
 See [data-model.md](data-model.md).
+
+## Dashboard architecture
+
+**Stack:** DuckDB WASM (browser) + Cloudflare Pages (static) + Cloudflare Worker (CORS proxy)
+
+**Data flow:**
+
+```mermaid
+flowchart TD
+    USER["User opens dashboard"]
+    PAGES["Cloudflare Pages<br/>(static HTML/JS/CSS)"]
+    WASM["DuckDB WASM<br/>(in browser)"]
+    WORKER["Cloudflare Worker<br/>(CORS proxy)"]
+    R2["Cloudflare R2<br/>(silver/*.parquet)"]
+
+    USER --> PAGES
+    PAGES --> WASM
+    WASM -->|"SQL query"| WORKER
+    WORKER -->|"HTTP range requests"| R2
+    R2 -->|"Parquet data"| WASM
+    WASM -->|"Query results"| PAGES
+```
+
+**Why:**
+
+- Zero infrastructure cost (Cloudflare free tier)
+- R2 stays private (Worker proxy handles auth + CORS)
+- Scales to unlimited users (browser compute)
+- Always fresh data (queries R2 directly)
+- Partitioned by route → fast queries for specific origin/destination
+
+**Setup required:**
+
+- R2 custom domain (already exists)
+- CORS policy on R2 bucket
+- Cloudflare Worker deployment
+- Dashboard directory (handled by other developer)
 
 ## Design decisions
 
