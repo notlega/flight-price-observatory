@@ -118,15 +118,25 @@ jobs:
           gzip -k "${{ steps.convert.outputs.jsonl }}"
           mv "${{ steps.convert.outputs.jsonl }}.gz" "storage/raw/$ASSET"
 
-      - name: Upload raw bundle to cycle release
-        uses: softprops/action-gh-release@v2
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2.6.0
         with:
           tag_name: ${{ env.CYCLE_TAG }}
           name: bronze-${{ env.CYCLE_DATE }}
           draft: ${{ env.CYCLE_DAY != '3' }}
           make_latest: false
-          files: storage/raw/${{ env.ASSET }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload raw bundle to cycle release
+        run: gh release upload "$CYCLE_TAG" "storage/raw/$ASSET" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release
+        if: env.CYCLE_DAY == '3'
+        run: gh release edit "$CYCLE_TAG" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Transform to Parquet (silver)
         run: |

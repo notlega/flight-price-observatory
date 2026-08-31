@@ -284,3 +284,19 @@ def test_transform_iata_case_expr_covers_all_airports() -> None:
     for name in AIRPORT_NAME_TO_IATA:
         assert name in expr_origin
         assert name in expr_dest
+
+
+def test_transform_maps_bali_airport_name() -> None:
+    """Ngurah Rai (Bali) International Airport → DPS."""
+    from collector.airports import resolve_iata
+
+    assert resolve_iata("Ngurah Rai (Bali) International Airport") == "DPS"
+    assert resolve_iata("Ngurah Rai International Airport") == "DPS"
+
+
+def test_transform_maps_tokyo_airport_name() -> None:
+    """Tokyo International Airport → HND."""
+    from collector.airports import resolve_iata
+
+    assert resolve_iata("Tokyo International Airport") == "HND"
+    assert resolve_iata("Tokyo Haneda Airport") == "HND"
