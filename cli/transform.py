@@ -63,6 +63,93 @@ def _iata_case_expr(col: str) -> str:
     return f"CASE {' '.join(cases)} ELSE {col} END"
 
 
+def _raw_columns(con, input_path: str) -> set[str]:
+    """Return the set of top-level columns present in a JSONL file."""
+    rows = con.execute(
+        f"DESCRIBE SELECT * FROM read_json_auto("
+        f"'{_sql_literal(input_path)}', "
+        f"format='newline_delimited', union_by_name=true)"
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _raw_col(columns: set[str], name: str, cast: str) -> str:
+    """SQL expr that casts a raw column, or NULL literal if column is absent.
+
+    Historical raw JSONL is schema-lean (e.g. missing ``return_date`` /
+    ``flight_type``). Referencing an absent column raises a binder error, so
+    absent columns become typed NULL instead.
+    """
+    if name not in columns:
+        return f"NULL::{cast}"
+    return f"{name}::{cast}"
+
+
+def _return_date_expr(columns: set[str]) -> str:
+    """SQL expression yielding return_date as DATE, NULL if column absent."""
+    if "return_date" not in columns:
+        return "NULL::DATE"
+    return (
+        "CASE WHEN return_date::VARCHAR = '' THEN NULL "
+        "ELSE TRY_CAST(return_date::VARCHAR AS DATE) END"
+    )
+
+
+def _build_query(input_path: str, columns: set[str]) -> str:
+    """Build the full transform SQL (unnest + casts + IATA mapping)."""
+    iata_origin = _iata_case_expr("origin")
+    iata_dest = _iata_case_expr("destination")
+
+    def raw_col(name: str, cast: str) -> str:
+        return _raw_col(columns, name, cast)
+
+    return f"""
+        WITH raw AS (
+            SELECT * FROM read_json_auto(
+                '{_sql_literal(input_path)}',
+                format='newline_delimited',
+                union_by_name=true
+            )
+        ),
+        unnested AS (
+            SELECT
+                origin,
+                destination,
+                {raw_col('dep_date', 'DATE')}      AS dep_date,
+                {_return_date_expr(columns)}   AS return_date,
+                {raw_col('flight_type', 'VARCHAR')} AS flight_type,
+                {raw_col('searched_at', 'TIMESTAMP')} AS searched_at,
+                f.price::FLOAT        AS price,
+                f.currency::VARCHAR   AS currency,
+                f.duration::INT       AS duration_minutes,
+                f.stops::INT          AS stops,
+                f.primary_airline::VARCHAR     AS airline,
+                f.primary_airline_name::VARCHAR AS airline_name,
+                f.co2_emissions_g::INT AS co2_emissions_g,
+                f.emissions_tag::VARCHAR AS emissions_tag,
+                f.booking_token::VARCHAR AS booking_token
+            FROM raw, UNNEST(flights) AS t(f)
+        )
+        SELECT
+            ({iata_origin}) AS origin,
+            ({iata_dest}) AS destination,
+            dep_date,
+            return_date,
+            flight_type,
+            searched_at,
+            price,
+            currency,
+            duration_minutes,
+            stops,
+            airline,
+            airline_name,
+            co2_emissions_g,
+            emissions_tag,
+            booking_token
+        FROM unnested
+    """
+
+
 def run(args: argparse.Namespace) -> None:
     """Convert the input JSONL to partitioned Parquet and print the output."""
     import duckdb
@@ -71,58 +158,10 @@ def run(args: argparse.Namespace) -> None:
     output = args.output or f"{DEFAULT_SILVER_DIR}/{datetime.now():%Y%m%d_%H%M%S}"
     Path(output).mkdir(parents=True, exist_ok=True)
 
-    iata_origin = _iata_case_expr("origin")
-    iata_dest = _iata_case_expr("destination")
-
     con = duckdb.connect()
     try:
-        query = f"""
-            WITH raw AS (
-                SELECT * FROM read_json_auto(
-                    '{_sql_literal(input_path)}',
-                    format='newline_delimited',
-                    union_by_name=true
-                )
-            ),
-            unnested AS (
-                SELECT
-                    origin,
-                    destination,
-                    dep_date::DATE        AS dep_date,
-                    CASE WHEN return_date::VARCHAR = '' THEN NULL
-                         ELSE TRY_CAST(return_date::VARCHAR AS DATE)
-                    END AS return_date,
-                    flight_type::VARCHAR  AS flight_type,
-                    searched_at::TIMESTAMP AS searched_at,
-                    f.price::FLOAT        AS price,
-                    f.currency::VARCHAR   AS currency,
-                    f.duration::INT       AS duration_minutes,
-                    f.stops::INT          AS stops,
-                    f.primary_airline::VARCHAR     AS airline,
-                    f.primary_airline_name::VARCHAR AS airline_name,
-                    f.co2_emissions_g::INT AS co2_emissions_g,
-                    f.emissions_tag::VARCHAR AS emissions_tag,
-                    f.booking_token::VARCHAR AS booking_token
-                FROM raw, UNNEST(flights) AS t(f)
-            )
-            SELECT
-                ({iata_origin}) AS origin,
-                ({iata_dest}) AS destination,
-                dep_date,
-                return_date,
-                flight_type,
-                searched_at,
-                price,
-                currency,
-                duration_minutes,
-                stops,
-                airline,
-                airline_name,
-                co2_emissions_g,
-                emissions_tag,
-                booking_token
-            FROM unnested
-        """
+        raw_columns = _raw_columns(con, input_path)
+        query = _build_query(input_path, raw_columns)
         count_row = con.execute(
             f"SELECT count(*) FROM ({query})"
         ).fetchone()
@@ -151,58 +190,10 @@ def transform_jsonl(input_path: str, output_dir: str) -> int:
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    iata_origin = _iata_case_expr("origin")
-    iata_dest = _iata_case_expr("destination")
-
     con = duckdb.connect()
     try:
-        query = f"""
-            WITH raw AS (
-                SELECT * FROM read_json_auto(
-                    '{_sql_literal(input_path)}',
-                    format='newline_delimited',
-                    union_by_name=true
-                )
-            ),
-            unnested AS (
-                SELECT
-                    origin,
-                    destination,
-                    dep_date::DATE        AS dep_date,
-                    CASE WHEN return_date::VARCHAR = '' THEN NULL
-                         ELSE TRY_CAST(return_date::VARCHAR AS DATE)
-                    END AS return_date,
-                    flight_type::VARCHAR  AS flight_type,
-                    searched_at::TIMESTAMP AS searched_at,
-                    f.price::FLOAT        AS price,
-                    f.currency::VARCHAR   AS currency,
-                    f.duration::INT       AS duration_minutes,
-                    f.stops::INT          AS stops,
-                    f.primary_airline::VARCHAR     AS airline,
-                    f.primary_airline_name::VARCHAR AS airline_name,
-                    f.co2_emissions_g::INT AS co2_emissions_g,
-                    f.emissions_tag::VARCHAR AS emissions_tag,
-                    f.booking_token::VARCHAR AS booking_token
-                FROM raw, UNNEST(flights) AS t(f)
-            )
-            SELECT
-                ({iata_origin}) AS origin,
-                ({iata_dest}) AS destination,
-                dep_date,
-                return_date,
-                flight_type,
-                searched_at,
-                price,
-                currency,
-                duration_minutes,
-                stops,
-                airline,
-                airline_name,
-                co2_emissions_g,
-                emissions_tag,
-                booking_token
-            FROM unnested
-        """
+        raw_columns = _raw_columns(con, input_path)
+        query = _build_query(input_path, raw_columns)
         count_row = con.execute(
             f"SELECT count(*) FROM ({query})"
         ).fetchone()

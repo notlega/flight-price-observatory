@@ -300,3 +300,60 @@ def test_transform_maps_tokyo_airport_name() -> None:
 
     assert resolve_iata("Tokyo International Airport") == "HND"
     assert resolve_iata("Tokyo Haneda Airport") == "HND"
+
+
+def test_transform_schema_lean_raw(tmp_path: Path) -> None:
+    """Old raw JSONL lacking return_date/flight_type transforms with NULLs."""
+    from cli.transform import transform_jsonl
+
+    path = tmp_path / "lean.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "route": "Singapore Changi International Airport|Ngurah Rai (Bali) International Airport",
+                "dep_date": "2026-08-10",
+                "origin": "Singapore Changi International Airport",
+                "destination": "Ngurah Rai (Bali) International Airport",
+                "flights": [
+                    {
+                        "price": 200.0,
+                        "currency": "SGD",
+                        "duration": 180,
+                        "stops": 0,
+                        "primary_airline": "SQ",
+                        "primary_airline_name": "Singapore Airlines",
+                        "co2_emissions_g": 80000,
+                        "emissions_tag": "lower",
+                        "booking_token": "tok",
+                    }
+                ],
+                "searched_at": "2026-08-09T10:00:00+00:00",
+            }
+        ],
+    )
+    output = tmp_path / "silver"
+    rows = transform_jsonl(str(path), str(output))
+    assert rows == 1
+
+    con = duckdb.connect()
+    cols = con.execute(
+        "DESCRIBE SELECT * FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true)"
+    ).fetchall()
+    names = {c[0]: c[1] for c in cols}
+    assert names["origin"] == "VARCHAR"
+    assert names["destination"] == "VARCHAR"
+    assert names["return_date"] == "DATE"
+    assert names["flight_type"] == "VARCHAR"
+
+    row = con.execute(
+        f"SELECT origin, destination, dep_date, return_date IS NULL, "
+        f"flight_type IS NULL FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true)"
+    ).fetchone()
+    assert row[0] == "SIN"
+    assert row[1] == "DPS"
+    assert row[3] is True
+    assert row[4] is True
+    con.close()
