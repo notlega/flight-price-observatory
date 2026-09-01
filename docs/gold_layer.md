@@ -20,7 +20,7 @@ Bronze + Silver are owned by the pipeline. Gold sits on top of Silver only.
 3. **Dedup by `itinerary_id`** before min/max aggregates (same fare re-appears across `searched_at` ticks day of run). `itinerary_id` is MD5(searched_at, booking_token, flight_type) and is the outbound↔return pairing key.
 4. **`lead_days`** = `dep_date − searched_at::date` (0..270). It is the advance-purchase dimension; bucket it.
 5. Money stays `DECIMAL`; round to 2dp at output, never float.
-6. Respect known gaps — see [Known Data Gaps](../README.md). No 0818/0826/0831 data, ever.
+6. Respect known gaps — see [Known Data Gaps](index.md#known-data-gaps). No 0818/0826/0831 data, ever.
 
 ## Deliverables (proposed gold tables, DuckDB)
 
