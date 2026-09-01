@@ -14,6 +14,7 @@ Unlike normal flight search (show current price), this snapshots prices over tim
 - [Installation](#installation)
 - [Running Locally](#running-locally)
 - [Roadmap](#roadmap)
+- [Ownership](#ownership)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -272,6 +273,18 @@ uv run lint
 - [ ] Interactive dashboard ([@josephyqf](https://github.com/josephyqf))
 - [ ] Price forecasting ML models ([@josephyqf](https://github.com/josephyqf))
 - [ ] Additional providers ([@notlega](https://github.com/notlega))
+
+## Ownership
+
+| Component | Owner | Notes |
+|-----------|-------|-------|
+| Bronze pipeline — collector, provider, workflow/cron, releases | [@notlega](https://github.com/notlega) | ADRs 0003–0006 |
+| Silver — transform schema, R2, backfill/reprocess | [@notlega](https://github.com/notlega) | silver v2 contract |
+| Gold layer — route profiles, lead curves, forward curve, spike warnings | [@josephyqf](https://github.com/josephyqf) | [runbook](docs/gold_layer.md) |
+| Dashboard + forecasting/ML | [@josephyqf](https://github.com/josephyqf) | roadmap open items |
+| Docs / ADRs | shared | touch → update |
+
+Gold consumes Silver read-only (never writes bronze/silver). Silver schema changes are a @notlega decision and require an ADR; notify the gold owner on breaking changes.
 
 ## Contributing
 
