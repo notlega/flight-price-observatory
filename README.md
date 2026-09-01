@@ -74,7 +74,31 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 
 **Bronze (GitHub Releases).** Raw JSONL gzipped, one asset per daily run. Release naming: `bronze-YYYYMMDD` (display name), tag `cycle-YYYYMMDD` (cycle start date). 4-day cycle: day 0 = full window (270d), day 1 = w30, day 2 = w60, day 3 = w90 + publish. Draft releases accumulate assets across cycle days; published on day 3.
 
-**Silver (Cloudflare R2).** Parquet files, Hive-partitioned: `silver/<RUN_TS>/origin=<IATA>/destination=<IATA>/*.parquet`. Schema: `date`, `flight_type`, `price`, `currency`, `origin`, `destination`, `airline`, `stops`, `departure_time`, `arrival_time`, `duration`. Nested flight fields stored as structs; absent fields nullable (schema-lean historical data handled gracefully). Total: 841 objects, ~299 MB across 55 runs. 17 unique destinations: the 15-route catalog (SIN → KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS) plus HKG, captured once by a backfill run outside the catalog.
+**Silver (Cloudflare R2).** Parquet files, Hive-partitioned: `silver/<RUN_TS>/origin=<IATA>/destination=<IATA>/*.parquet`, zstd compressed. Conformed schema (silver v2) — partition columns are materialized into the files (DuckDB `PARTITION_BY` strips them at write; the transform re-injects them):
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `origin`, `destination` | VARCHAR | IATA; present as file columns **and** partition dirs |
+| `dep_date`, `return_date` | DATE | `return_date` NULL for one-way |
+| `flight_type` | VARCHAR | `ONE_WAY` \| `ROUND_TRIP` |
+| `searched_at` | TIMESTAMP | when the fare was queried |
+| `price` | DECIMAL(12,2) | 2dp, local currency (SGD observed) |
+| `price_present` | BOOLEAN | false when fare unavailable (≈10% of rows) |
+| `currency` | VARCHAR | ISO 4217 |
+| `duration_minutes` | INTEGER | |
+| `stops` | INTEGER | |
+| `airline` | VARCHAR | display name (IATA code lives inside `booking_token`) |
+| `co2_emissions_g` | INTEGER | |
+| `emissions_tag` | VARCHAR | lower / medium / higher |
+| `booking_token` | VARCHAR | opaque fare token |
+| `run_ts` | VARCHAR | `YYYYMMDD_HHMMSS` collection run id |
+| `lead_days` | INTEGER | `dep_date − searched_at` (advance-purchase window) |
+| `direction` | VARCHAR | `ROUND_TRIP` \| `OUTBOUND` (SIN→X) \| `RETURN` (X→SIN) \| `OTHER` |
+| `itinerary_id` | VARCHAR | MD5(searched_at, booking_token, flight_type) — dedup/fare-pair key |
+
+Querying: target the silver prefix directly; `origin`/`destination` are real columns, so `hive_partitioning` is not required (still harmless). Ingest via DuckDB `read_parquet('s3://.../**/*.parquet')` / `httpfs`, or `aws s3 sync`.
+
+Totals: 55 runs, 986 files, ~740 MB, ~23.6M rows (v2 re-projection from bronze recovered ~10% null-price rows that v1 backfill had dropped). 17 unique destinations: the 15-route catalog (SIN → KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS) plus HKG, captured once by a backfill run outside the catalog.
 
 **Backfill.** Historical local JSONL (Jul 11 — Aug 17, 43 files) uploaded to R2 silver + GitHub release `backfill-archive` (43 bronze gz assets). Covering pre-schedule data gap.
 
@@ -89,7 +113,7 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 
 Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831 have neither bronze nor silver. Bronze release `bronze-20260830` is a draft until the day-3 run publishes it (assets accumulate 0830 → 0901 → 0902).
 
-**Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis.
+**Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis. Gold layer (aggregated route profiles, buy-advice, spike alerts) — implementation runbook for collaborators: [docs/gold_layer.md](docs/gold_layer.md).
 
 **Presentation.** (Future) Dashboard -- Streamlit + Plotly. Decoupled from pipeline. Consumes processed datasets only.
 

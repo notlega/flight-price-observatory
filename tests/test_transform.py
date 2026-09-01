@@ -2,6 +2,7 @@
 
 import json
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
@@ -167,7 +168,7 @@ def test_transform_maps_iata_codes(sample_jsonl: Path, tmp_path: Path) -> None:
 
 
 def test_transform_preserves_price_and_currency(sample_jsonl: Path, tmp_path: Path) -> None:
-    """Price and currency survive transformation."""
+    """Price and currency survive transformation (silver v2: price is DECIMAL)."""
     from cli.transform import transform_jsonl
 
     output = tmp_path / "silver"
@@ -179,7 +180,7 @@ def test_transform_preserves_price_and_currency(sample_jsonl: Path, tmp_path: Pa
     ).fetchall()
     con.close()
 
-    assert [(95.0, "SGD"), (110.0, "SGD"), (120.0, "SGD")] == prices
+    assert [(Decimal("95.00"), "SGD"), (Decimal("110.00"), "SGD"), (Decimal("120.00"), "SGD")] == prices
 
 
 def test_transform_handles_return_date(sample_jsonl: Path, tmp_path: Path) -> None:
@@ -356,4 +357,117 @@ def test_transform_schema_lean_raw(tmp_path: Path) -> None:
     assert row[1] == "DPS"
     assert row[3] is True
     assert row[4] is True
+    con.close()
+
+
+def test_transform_v2_materializes_partition_and_new_columns(
+    sample_jsonl: Path, tmp_path: Path
+) -> None:
+    """Silver v2: origin/destination are file columns too; v2 cols present."""
+    from cli.transform import transform_jsonl
+
+    output = tmp_path / "silver"
+    transform_jsonl(str(sample_jsonl), str(output))
+
+    con = duckdb.connect()
+    cols = {
+        c[0]: c[1]
+        for c in con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{output}/**/*.parquet', "
+            "hive_partitioning=false)"
+        ).fetchall()
+    }
+    assert len(cols) == len(
+        con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{output}/**/*.parquet', "
+            "hive_partitioning=false)"
+        ).fetchall()
+    )  # no duplicate (renamed _1) columns
+
+    assert cols["origin"] == "VARCHAR"
+    assert cols["destination"] == "VARCHAR"
+    assert cols["price"] == "DECIMAL(12,2)"
+    assert cols["price_present"] == "BOOLEAN"
+    assert cols["run_ts"] == "VARCHAR"
+    assert cols["lead_days"] == "INTEGER"
+    assert cols["direction"] == "VARCHAR"
+    assert cols["itinerary_id"] == "VARCHAR"
+    assert "airline_name" not in cols  # duplicate of airline, dropped in v2
+    con.close()
+
+
+def test_transform_v2_direction_and_derived_fields(
+    sample_jsonl: Path, roundtrip_jsonl: Path, tmp_path: Path
+) -> None:
+    """direction/lead_days/itinerary_id populated per flight semantics."""
+    from cli.transform import transform_jsonl
+
+    output = tmp_path / "silver"
+    transform_jsonl(str(sample_jsonl), str(output))
+
+    con = duckdb.connect()
+    rows = con.execute(
+        f"SELECT direction, lead_days, itinerary_id IS NOT NULL FROM "
+        f"read_parquet('{output}/**/*.parquet', hive_partitioning=true)"
+    ).fetchall()
+    assert rows == [
+        ("OUTBOUND", 1, True),
+        ("OUTBOUND", 1, True),
+        ("OUTBOUND", 2, True),
+    ]  # searched 08-14, deps 08-15/08-15/08-16
+
+    rt = tmp_path / "rt"
+    transform_jsonl(str(roundtrip_jsonl), str(rt), run_ts="20260819_053000")
+    row = con.execute(
+        f"SELECT direction, run_ts, itinerary_id IS NOT NULL FROM "
+        f"read_parquet('{rt}/**/*.parquet', hive_partitioning=true)"
+    ).fetchone()
+    assert row[0] == "ROUND_TRIP"
+    assert row[1] == "20260819_053000"
+    assert row[2] is True
+    con.close()
+
+
+def test_transform_v2_marks_return_and_null_price(tmp_path: Path) -> None:
+    """Reverse-leg flights → RETURN, null price → price_present false."""
+    from cli.transform import transform_jsonl
+
+    path = tmp_path / "reverse.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "route": "Kul|Singapore",
+                "dep_date": "2026-08-15",
+                "return_date": "",
+                "flight_type": "ONE_WAY",
+                "origin": "Kuala Lumpur International Airport",
+                "destination": "Singapore Changi International Airport",
+                "flights": [
+                    {
+                        "price": None,
+                        "currency": "SGD",
+                        "duration": 300,
+                        "stops": 1,
+                        "primary_airline": "AK",
+                        "primary_airline_name": "AirAsia",
+                        "co2_emissions_g": 150000,
+                        "emissions_tag": "typical",
+                        "booking_token": "tok2",
+                    }
+                ],
+                "searched_at": "2026-08-14T16:00:00+00:00",
+            }
+        ],
+    )
+    output = tmp_path / "silver"
+    transform_jsonl(str(path), str(output))
+
+    con = duckdb.connect()
+    row = con.execute(
+        f"SELECT origin, destination, direction, price_present, price FROM "
+        f"read_parquet('{output}/**/*.parquet', hive_partitioning=true)"
+    ).fetchone()
+    assert row[:4] == ("KUL", "SIN", "RETURN", False)
+    assert row[4] is None
     con.close()
