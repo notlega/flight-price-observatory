@@ -37,10 +37,15 @@ jobs:
       - name: Compute cycle day, window and release metadata
         run: |
           eval "$(python3 - <<'PY'
-          from datetime import date, timedelta
+          from datetime import date, timedelta, timezone, datetime
 
           anchor = date.fromisoformat("${{ env.ANCHOR_DATE }}")
-          today = date.today()
+          now = datetime.now(timezone.utc)
+          today = now.date()
+          # If schedule delayed past midnight (common for late-running workflows),
+          # use yesterday to stay aligned with the intended scheduled day.
+          if "${{ github.event_name }}" == "schedule" and now.hour < 6:
+              today -= timedelta(days=1)
           offset = (today - anchor).days
           cycle_day = offset % 4
           cycle_start = anchor + timedelta(days=(offset // 4) * 4)

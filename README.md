@@ -68,7 +68,15 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 
 **Validation + transformation.** Schema validation, type checking, dedup, normalisation, enrichment. Separate raw from processed.
 
-**Data lake.** Bronze: one GitHub Release per cycle (`bronze-YYYYMMDD`, tag `cycle-YYYYMMDD`) carrying the gzipped JSONL bundle from each of the 4 runs. Silver: Parquet (Hive-partitioned by route) uploaded to R2. Gold (aggregated analytics) later. Immutable raw tier enables reprocessing.
+**Data lake.** Bronze: one GitHub Release per cycle (`bronze-YYYYMMDD`, tag `cycle-YYYYMMDD`) carrying the gzipped JSONL bundle from each of the 4 runs. Silver: Parquet (partitioned by `origin=X/destination=Y`) uploaded to R2 under `silver/<RUN_TS>/`. Gold (aggregated analytics) later. Immutable raw tier enables reprocessing.
+
+### Data Tiers
+
+**Bronze (GitHub Releases).** Raw JSONL gzipped, one asset per daily run. Release naming: `bronze-YYYYMMDD` (display name), tag `cycle-YYYYMMDD` (cycle start date). 4-day cycle: day 0 = full window (270d), day 1 = w30, day 2 = w60, day 3 = w90 + publish. Draft releases accumulate assets across cycle days; published on day 3.
+
+**Silver (Cloudflare R2).** Parquet files, Hive-partitioned: `silver/<RUN_TS>/origin=<IATA>/destination=<IATA>/*.parquet`. Schema: `date`, `flight_type`, `price`, `currency`, `origin`, `destination`, `airline`, `stops`, `departure_time`, `arrival_time`, `duration`. Nested flight fields stored as structs; absent fields nullable (schema-lean historical data handled gracefully). Total: 811 objects, ~297 MB across 54 runs.
+
+**Backfill.** Historical local JSONL (Jul 11 — Aug 17, 43 files) uploaded to R2 silver + GitHub release `backfill-archive` (43 bronze gz assets). Covering pre-schedule data gap.
 
 **Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis.
 
