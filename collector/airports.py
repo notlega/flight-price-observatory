@@ -25,6 +25,7 @@ AIRPORT_NAME_TO_IATA: dict[str, str] = {
     "Beijing Daxing International Airport": "PKX",
     "Incheon International Airport": "ICN",
     "Gimhae International Airport": "PUS",
+    "Chek Lap Kok International Airport": "HKG",
 }
 
 

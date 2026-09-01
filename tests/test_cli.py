@@ -175,6 +175,9 @@ def test_transform_run_writes_partitioned_parquet(monkeypatch, tmp_path, capsys)
                 def fetchone(self):
                     return (7,)
 
+                def fetchall(self):
+                    return []
+
             return Result()
 
         def close(self):
@@ -182,9 +185,9 @@ def test_transform_run_writes_partitioned_parquet(monkeypatch, tmp_path, capsys)
 
     monkeypatch.setattr("duckdb.connect", lambda *a, **k: FakeDuckDB())
     transform_mod.run(argparse.Namespace(input="in.jsonl", output="out"))
-    assert len(executed) == 2
+    assert len(executed) == 3
     assert "read_json_auto('in.jsonl'" in executed[0]
-    assert "PARTITION_BY (route)" in executed[1]
+    assert any("PARTITION_BY (origin, destination)" in e for e in executed)
     assert "Output: out" in capsys.readouterr().out
 
 
