@@ -95,6 +95,18 @@ def _return_date_expr(columns: set[str]) -> str:
     )
 
 
+def _flight_field(field: str, cast: str) -> str:
+    """Null-safe access to a flight struct field via JSON.
+
+    Some historical flight items are schema-lean (e.g. a probe/bot-check
+    response carrying only ``price``/``origin``). Field access on a missing
+    struct key raises a binder error, so we route access through
+    ``json_extract_string`` (returns NULL for absent keys, and clean
+    unquoted strings) then cast.
+    """
+    return f"TRY_CAST(json_extract_string(to_json(f), '$.{field}') AS {cast})"
+
+
 def _build_query(input_path: str, columns: set[str]) -> str:
     """Build the full transform SQL (unnest + casts + IATA mapping)."""
     iata_origin = _iata_case_expr("origin")
@@ -119,15 +131,15 @@ def _build_query(input_path: str, columns: set[str]) -> str:
                 {_return_date_expr(columns)}   AS return_date,
                 {raw_col('flight_type', 'VARCHAR')} AS flight_type,
                 {raw_col('searched_at', 'TIMESTAMP')} AS searched_at,
-                f.price::FLOAT        AS price,
-                f.currency::VARCHAR   AS currency,
-                f.duration::INT       AS duration_minutes,
-                f.stops::INT          AS stops,
-                f.primary_airline::VARCHAR     AS airline,
-                f.primary_airline_name::VARCHAR AS airline_name,
-                f.co2_emissions_g::INT AS co2_emissions_g,
-                f.emissions_tag::VARCHAR AS emissions_tag,
-                f.booking_token::VARCHAR AS booking_token
+                {_flight_field('price', 'FLOAT')}        AS price,
+                {_flight_field('currency', 'VARCHAR')}   AS currency,
+                {_flight_field('duration', 'INT')}       AS duration_minutes,
+                {_flight_field('stops', 'INT')}          AS stops,
+                {_flight_field('primary_airline', 'VARCHAR')}     AS airline,
+                {_flight_field('primary_airline_name', 'VARCHAR')} AS airline_name,
+                {_flight_field('co2_emissions_g', 'INT')} AS co2_emissions_g,
+                {_flight_field('emissions_tag', 'VARCHAR')} AS emissions_tag,
+                {_flight_field('booking_token', 'VARCHAR')} AS booking_token
             FROM raw, UNNEST(flights) AS t(f)
         )
         SELECT
