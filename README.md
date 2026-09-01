@@ -74,9 +74,20 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/design.md](docs/des
 
 **Bronze (GitHub Releases).** Raw JSONL gzipped, one asset per daily run. Release naming: `bronze-YYYYMMDD` (display name), tag `cycle-YYYYMMDD` (cycle start date). 4-day cycle: day 0 = full window (270d), day 1 = w30, day 2 = w60, day 3 = w90 + publish. Draft releases accumulate assets across cycle days; published on day 3.
 
-**Silver (Cloudflare R2).** Parquet files, Hive-partitioned: `silver/<RUN_TS>/origin=<IATA>/destination=<IATA>/*.parquet`. Schema: `date`, `flight_type`, `price`, `currency`, `origin`, `destination`, `airline`, `stops`, `departure_time`, `arrival_time`, `duration`. Nested flight fields stored as structs; absent fields nullable (schema-lean historical data handled gracefully). Total: 811 objects, ~297 MB across 54 runs.
+**Silver (Cloudflare R2).** Parquet files, Hive-partitioned: `silver/<RUN_TS>/origin=<IATA>/destination=<IATA>/*.parquet`. Schema: `date`, `flight_type`, `price`, `currency`, `origin`, `destination`, `airline`, `stops`, `departure_time`, `arrival_time`, `duration`. Nested flight fields stored as structs; absent fields nullable (schema-lean historical data handled gracefully). Total: 841 objects, ~299 MB across 55 runs. 17 unique destinations: the 15-route catalog (SIN → KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS) plus HKG, captured once by a backfill run outside the catalog.
 
 **Backfill.** Historical local JSONL (Jul 11 — Aug 17, 43 files) uploaded to R2 silver + GitHub release `backfill-archive` (43 bronze gz assets). Covering pre-schedule data gap.
+
+### Known Data Gaps
+
+| Date | Bronze | Silver | Cause |
+|------|--------|--------|-------|
+| 2026-08-18 | — | — | First scheduled cycle day; Aug 18 run failed |
+| 2026-08-19 | ✅ | ✅ | Bronze always present; silver backfilled from bronze |
+| 2026-08-26 | — | — | Aug 26 cron never ran |
+| 2026-08-31 | — | — | Aug 31 cron delayed past midnight; cycle day shifted (fixed in workflow, fix awaiting push) |
+
+Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831 have neither bronze nor silver. Bronze release `bronze-20260830` is a draft until the day-3 run publishes it (assets accumulate 0830 → 0901 → 0902).
 
 **Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis.
 
