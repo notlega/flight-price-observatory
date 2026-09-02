@@ -5,7 +5,7 @@ author: "@josephyqf"
 
 # Gold Layer — Implementation Runbook
 
-Owner: **@josephyqf** (consumes Silver, never writes bronze/silver). Gold tables + alert thresholds owned by @josephyqf. Silver source contract owned by @notlega — breaking schema changes require ADR + notice to the gold owner.
+Owner: **[@josephyqf](https://github.com/josephyqf)** (consumes Silver, never writes bronze/silver). Gold tables + alert thresholds owned by [@josephyqf](https://github.com/josephyqf). Silver source contract owned by [@notlega](https://github.com/notlega) — breaking schema changes require ADR + notice to the gold owner.
 
 Bronze + Silver are owned by the pipeline. Gold sits on top of Silver only.
 

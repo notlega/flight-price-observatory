@@ -118,6 +118,16 @@ jobs:
           echo "jsonl=$JSONL" >> "$GITHUB_OUTPUT"
           echo "jsonl=$JSONL"
 
+      - name: Verify release asset
+        if: success()
+        run: |
+          gh release view "$CYCLE_TAG" --json assets --jq '.assets[].name' \
+            | grep -qxF "$ASSET" \
+            && echo "asset present: $ASSET" \
+            || (echo "::error::asset missing: $ASSET on $CYCLE_TAG"; exit 1)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Compress raw bundle
         run: |
           gzip -k "${{ steps.convert.outputs.jsonl }}"

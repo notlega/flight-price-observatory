@@ -107,10 +107,10 @@ Totals: 55 runs, 986 files, ~740 MB, ~23.6M rows (v2 re-projection from bronze r
 
 | Date | Bronze | Silver | Cause |
 |------|--------|--------|-------|
-| 2026-08-18 | — | — | First scheduled cycle day; Aug 18 run failed |
+| 2026-08-18 | — | — | First scheduled cycle day; Export step crashed (missing `storage/raw/`, step-order bug since fixed) |
 | 2026-08-19 | ✅ | ✅ | Bronze always present; silver backfilled from bronze |
 | 2026-08-26 | — | — | Aug 26 cron never ran |
-| 2026-08-31 | — | — | Aug 31 cron delayed past midnight; cycle day shifted (fixed in workflow, fix awaiting push) |
+| 2026-08-31 | — | — | Aug 31 cron delayed past midnight; cycle day shifted (date guard shipped) |
 
 Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831 have neither bronze nor silver. Bronze release `bronze-20260830` is a draft until the day-3 run publishes it (assets accumulate 0830 → 0901 → 0902).
 
@@ -284,7 +284,7 @@ uv run lint
 | Dashboard + forecasting/ML | [@josephyqf](https://github.com/josephyqf) | roadmap open items |
 | Docs / ADRs | shared | touch → update |
 
-Gold consumes Silver read-only (never writes bronze/silver). Silver schema changes are a @notlega decision and require an ADR; notify the gold owner on breaking changes.
+Gold consumes Silver read-only (never writes bronze/silver). Silver schema changes are a [@notlega](https://github.com/notlega) decision and require an ADR; notify the gold owner on breaking changes.
 
 ## Contributing
 
