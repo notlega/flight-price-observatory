@@ -43,7 +43,7 @@ Six layers:
 
 **Scheduler.** GitHub Actions cron, 4-day cycle at 05:30 SGT (see [ADR-0006](decisions/0006-scheduling.md)). No manual intervention.
 
-**Data collection.** Provider abstraction layer. Each provider implements `BaseProvider` interface. Currently: `GoogleFlightsProvider` (SIN->KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS). Swap or add providers without touching pipeline.
+**Data collection.** Provider abstraction layer (`BaseProvider` interface). Currently: `GoogleFlightsProvider` — SIN to 15 Asian destinations across Southeast Asia (KUL, CGK, BKK, HKT, DPS, MNL, SGN, HAN), East Asia (NRT, KIX, HND, ICN), and China (PVG, PEK, PUS). Swap or add providers without touching pipeline.
 
 **Routes.** `RouteCatalog` (`collector/routes.py`) defines 15 destinations out of SIN. Each date in the search window generates 30 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per SIN-origin route (return offsets 7, 14, 21 days) — 75 searches per route/date, 20,325 per full 271-day window.
 
