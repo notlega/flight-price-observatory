@@ -28,6 +28,10 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+plugins:
+  - search
+  - meta
+
 nav:
   - Home: index.md
   - Architecture: architecture.md

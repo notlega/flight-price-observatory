@@ -1,3 +1,8 @@
+---
+description: Data model reference — SQLite intermediary schema, silver Parquet columns, and R2 storage layout.
+author: "@notlega"
+---
+
 # Data Model
 
 ## SQLite intermediary (`search_results`)

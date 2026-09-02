@@ -1,3 +1,8 @@
+---
+description: Auto-collect, store, and analyse historical airfare data across 15 Asian routes from Singapore. Longitudinal dataset for trend analysis and ML.
+author: "@notlega"
+---
+
 # Flight Price Observatory
 
 Auto-collect, store, analyse historical airfare data. SIN -> 15 Asian destinations. Build longitudinal dataset for trend analysis + ML.

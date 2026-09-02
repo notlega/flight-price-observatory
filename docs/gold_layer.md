@@ -1,3 +1,8 @@
+---
+description: Gold layer implementation runbook — route daily profiles, lead-time curves, forward curves, and spike detection.
+author: "@josephyqf"
+---
+
 # Gold Layer — Implementation Runbook
 
 Owner: **@josephyqf** (consumes Silver, never writes bronze/silver). Gold tables + alert thresholds owned by @josephyqf. Silver source contract owned by @notlega — breaking schema changes require ADR + notice to the gold owner.

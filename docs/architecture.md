@@ -1,3 +1,8 @@
+---
+description: System architecture of the flight price observatory — six-layer pipeline from scheduler to dashboard, bronze/silver/gold data lake.
+author: "@notlega"
+---
+
 # Architecture
 
 ## Layers

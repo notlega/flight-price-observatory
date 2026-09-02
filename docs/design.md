@@ -1,3 +1,8 @@
+---
+description: Design principles of the observatory — provider-agnostic core, async-first pipeline, failure-as-data.
+author: "@notlega"
+---
+
 # Design
 
 ## Principles
