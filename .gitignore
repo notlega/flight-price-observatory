@@ -358,5 +358,7 @@ storage/proxy_cache.json
 scripts/scan_r2.py
 scripts/backfill.py
 scripts/optimize_r2.py
+scripts/fix_iata_r2.py
+scripts/reprocess_silver_v2.py
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,pythonvanilla,venv,pycharm

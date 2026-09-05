@@ -236,7 +236,6 @@ class SearchRepository:
         """Stop the writer and close the connection; safe when never opened."""
         if self._conn is None:
             return
-            return
         if self._queue is not None:
             self._queue.put_nowait(_STOP)
             if self._writer_task is not None:

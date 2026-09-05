@@ -155,18 +155,18 @@ def _build_query(input_path: str, columns: set[str], run_ts: str | None = None) 
             SELECT
                 origin            AS raw_origin,
                 destination       AS raw_destination,
-                {raw_col('dep_date', 'DATE')}        AS dep_date,
+                {raw_col("dep_date", "DATE")}        AS dep_date,
                 {_return_date_expr(columns)}     AS return_date,
-                {raw_col('flight_type', 'VARCHAR')} AS flight_type,
-                {raw_col('searched_at', 'TIMESTAMP')} AS searched_at,
-                {_flight_field('price', 'DOUBLE')}     AS price,
-                {_flight_field('currency', 'VARCHAR')} AS currency,
-                {_flight_field('duration', 'INT')}     AS duration_minutes,
-                {_flight_field('stops', 'INT')}        AS stops,
-                {_flight_field('primary_airline', 'VARCHAR')} AS airline,
-                {_flight_field('co2_emissions_g', 'INT')} AS co2_emissions_g,
-                {_flight_field('emissions_tag', 'VARCHAR')} AS emissions_tag,
-                {_flight_field('booking_token', 'VARCHAR')} AS booking_token,
+                {raw_col("flight_type", "VARCHAR")} AS flight_type,
+                {raw_col("searched_at", "TIMESTAMP")} AS searched_at,
+                {_flight_field("price", "DOUBLE")}     AS price,
+                {_flight_field("currency", "VARCHAR")} AS currency,
+                {_flight_field("duration", "INT")}     AS duration_minutes,
+                {_flight_field("stops", "INT")}        AS stops,
+                {_flight_field("primary_airline", "VARCHAR")} AS airline,
+                {_flight_field("co2_emissions_g", "INT")} AS co2_emissions_g,
+                {_flight_field("emissions_tag", "VARCHAR")} AS emissions_tag,
+                {_flight_field("booking_token", "VARCHAR")} AS booking_token,
                 {_run_ts_literal(run_ts)}          AS run_ts
             FROM raw, UNNEST(flights) AS t(f)
         )
@@ -262,9 +262,7 @@ def transform_jsonl(input_path: str, output_dir: str, run_ts: str | None = None)
     try:
         raw_columns = _raw_columns(con, input_path)
         query = _build_query(input_path, raw_columns, run_ts=run_ts)
-        count_row = con.execute(
-            f"SELECT count(*) FROM ({query})"
-        ).fetchone()
+        count_row = con.execute(f"SELECT count(*) FROM ({query})").fetchone()
         total = count_row[0] if count_row else 0
 
         con.execute(

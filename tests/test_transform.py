@@ -1,7 +1,6 @@
 """Tests for cli/transform.py — Parquet transformation pipeline."""
 
 import json
-import os
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,7 +19,10 @@ def sample_jsonl(tmp_path: Path) -> Path:
     """Create a minimal JSONL file with one route, two flights."""
     rows = [
         {
-            "route": "Singapore Changi International Airport|Kuala Lumpur International Airport",
+            "route": (
+                "Singapore Changi International Airport"
+                "|Kuala Lumpur International Airport"
+            ),
             "dep_date": "2026-08-15",
             "return_date": "",
             "flight_type": "ONE_WAY",
@@ -53,7 +55,10 @@ def sample_jsonl(tmp_path: Path) -> Path:
             "searched_at": "2026-08-14T15:00:00+00:00",
         },
         {
-            "route": "Singapore Changi International Airport|Kuala Lumpur International Airport",
+            "route": (
+                "Singapore Changi International Airport"
+                "|Kuala Lumpur International Airport"
+            ),
             "dep_date": "2026-08-16",
             "return_date": "",
             "flight_type": "ONE_WAY",
@@ -85,7 +90,9 @@ def roundtrip_jsonl(tmp_path: Path) -> Path:
     """Create a JSONL file with a round-trip flight."""
     rows = [
         {
-            "route": "Singapore Changi International Airport|Narita International Airport",
+            "route": (
+                "Singapore Changi International Airport|Narita International Airport"
+            ),
             "dep_date": "2026-09-01",
             "return_date": "2026-09-14",
             "flight_type": "ROUND_TRIP",
@@ -140,7 +147,8 @@ def test_transform_casts_dep_date_to_date(sample_jsonl: Path, tmp_path: Path) ->
 
     con = duckdb.connect()
     dtype = con.execute(
-        f"SELECT typeof(dep_date) FROM read_parquet('{output}/**/*.parquet', hive_partitioning=true) LIMIT 1"
+        f"SELECT typeof(dep_date) FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true) LIMIT 1"
     ).fetchone()[0]
     con.close()
 
@@ -156,10 +164,12 @@ def test_transform_maps_iata_codes(sample_jsonl: Path, tmp_path: Path) -> None:
 
     con = duckdb.connect()
     origins = con.execute(
-        f"SELECT DISTINCT origin FROM read_parquet('{output}/**/*.parquet', hive_partitioning=true)"
+        f"SELECT DISTINCT origin FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true)"
     ).fetchall()
     destinations = con.execute(
-        f"SELECT DISTINCT destination FROM read_parquet('{output}/**/*.parquet', hive_partitioning=true)"
+        f"SELECT DISTINCT destination FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true)"
     ).fetchall()
     con.close()
 
@@ -167,7 +177,9 @@ def test_transform_maps_iata_codes(sample_jsonl: Path, tmp_path: Path) -> None:
     assert {r[0] for r in destinations} == {"KUL"}
 
 
-def test_transform_preserves_price_and_currency(sample_jsonl: Path, tmp_path: Path) -> None:
+def test_transform_preserves_price_and_currency(
+    sample_jsonl: Path, tmp_path: Path
+) -> None:
     """Price and currency survive transformation (silver v2: price is DECIMAL)."""
     from cli.transform import transform_jsonl
 
@@ -176,11 +188,16 @@ def test_transform_preserves_price_and_currency(sample_jsonl: Path, tmp_path: Pa
 
     con = duckdb.connect()
     prices = con.execute(
-        f"SELECT price, currency FROM read_parquet('{output}/**/*.parquet', hive_partitioning=true) ORDER BY price"
+        f"SELECT price, currency FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true) ORDER BY price"
     ).fetchall()
     con.close()
 
-    assert [(Decimal("95.00"), "SGD"), (Decimal("110.00"), "SGD"), (Decimal("120.00"), "SGD")] == prices
+    assert [
+        (Decimal("95.00"), "SGD"),
+        (Decimal("110.00"), "SGD"),
+        (Decimal("120.00"), "SGD"),
+    ] == prices
 
 
 def test_transform_handles_return_date(sample_jsonl: Path, tmp_path: Path) -> None:
@@ -192,7 +209,8 @@ def test_transform_handles_return_date(sample_jsonl: Path, tmp_path: Path) -> No
 
     con = duckdb.connect()
     result = con.execute(
-        f"SELECT return_date IS NULL FROM read_parquet('{output}/**/*.parquet', hive_partitioning=true) LIMIT 1"
+        f"SELECT return_date IS NULL FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true) LIMIT 1"
     ).fetchone()
     con.close()
 
@@ -208,7 +226,8 @@ def test_transform_roundtrip_return_date(roundtrip_jsonl: Path, tmp_path: Path) 
 
     con = duckdb.connect()
     result = con.execute(
-        f"SELECT return_date FROM read_parquet('{output}/**/*.parquet', hive_partitioning=true) LIMIT 1"
+        f"SELECT return_date FROM read_parquet("
+        f"'{output}/**/*.parquet', hive_partitioning=true) LIMIT 1"
     ).fetchone()
     con.close()
 
@@ -223,7 +242,10 @@ def test_transform_empty_flights_skipped(tmp_path: Path) -> None:
 
     rows = [
         {
-            "route": "Singapore Changi International Airport|Kuala Lumpur International Airport",
+            "route": (
+                "Singapore Changi International Airport"
+                "|Kuala Lumpur International Airport"
+            ),
             "dep_date": "2026-08-15",
             "return_date": "",
             "flight_type": "ONE_WAY",
@@ -312,7 +334,10 @@ def test_transform_schema_lean_raw(tmp_path: Path) -> None:
         path,
         [
             {
-                "route": "Singapore Changi International Airport|Ngurah Rai (Bali) International Airport",
+                "route": (
+                    "Singapore Changi International Airport"
+                    "|Ngurah Rai (Bali) International Airport"
+                ),
                 "dep_date": "2026-08-10",
                 "origin": "Singapore Changi International Airport",
                 "destination": "Ngurah Rai (Bali) International Airport",
