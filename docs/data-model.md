@@ -51,8 +51,8 @@ One line per successful route search:
 
 ## Route catalog (`collector/routes.py`)
 
-- **Destinations:** KUL, CGK, BKK, HKT, DPS, MNL, SGN, HAN, NRT, KIX, HND, PVG, PEK (13).
-- **One-way:** every date in the search window x both directions (`RouteCatalog.one_way_routes()`) — 26 tasks/date.
+- **Destinations:** KUL, CGK, BKK, HKT, DPS, MNL, SGN, HAN, NRT, KIX, HND, TPE, PVG, PEK, ICN, PUS (16).
+- **One-way:** every date in the search window x both directions (`RouteCatalog.one_way_routes()`) — 32 tasks/date.
 - **Round-trip:** `RouteCatalog.round_trip_routes()` (SIN->dest only), return offsets `ROUND_TRIP_OFFSETS = (7, 14, 21)` days — 3 extra tasks/route/date.
 - Encoded in `search_results` as `return_date` (empty = one-way) + `flight_type` (`ONE_WAY` / `ROUND_TRIP`).
 
@@ -88,7 +88,7 @@ Optimised Parquet files stored in Cloudflare R2, partitioned by route.
 
 `origin/destination`
 - Query: "SIN→KUL" → reads 1 partition
-- ~156 partitions max (15 destinations × 10+ origins)
+- ~166 partitions max (16 destinations × both directions)
 
 ### Compression
 

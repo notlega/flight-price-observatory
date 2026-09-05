@@ -30,6 +30,7 @@ class RouteCatalog:
         "NRT",
         "KIX",
         "HND",
+        "TPE",
         "PVG",
         "PEK",
         "ICN",

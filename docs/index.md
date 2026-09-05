@@ -43,9 +43,9 @@ Six layers:
 
 **Scheduler.** GitHub Actions cron, 4-day cycle at 05:30 SGT (see [ADR-0006](decisions/0006-scheduling.md)). No manual intervention.
 
-**Data collection.** Provider abstraction layer (`BaseProvider` interface). Currently: `GoogleFlightsProvider` — SIN to 15 Asian destinations across Southeast Asia (KUL, CGK, BKK, HKT, DPS, MNL, SGN, HAN), East Asia (NRT, KIX, HND, ICN), and China (PVG, PEK, PUS). Swap or add providers without touching pipeline.
+**Data collection.** Provider abstraction layer (`BaseProvider` interface). Currently: `GoogleFlightsProvider` — SIN to 16 Asian destinations across Southeast Asia (KUL, CGK, BKK, HKT, DPS, MNL, SGN, HAN), East Asia (NRT, KIX, HND, TPE), and China (PVG, PEK, PUS). Swap or add providers without touching pipeline.
 
-**Routes.** `RouteCatalog` (`collector/routes.py`) defines 15 destinations out of SIN. Each date in the search window generates 30 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per SIN-origin route (return offsets 7, 14, 21 days) — 75 searches per route/date, 20,325 per full 271-day window.
+**Routes.** `RouteCatalog` (`collector/routes.py`) defines 16 destinations out of SIN. Each date in the search window generates 32 one-way tasks (SIN->dest and dest->SIN) plus 3 round-trip tasks per SIN-origin route (return offsets 7, 14, 21 days) — 80 searches per route/date, 21,680 per full 271-day window.
 
 > **Midnight caveat.** Runs crossing midnight keep only future dates after rollover: a run started 23:50 builds today's tasks, which become invalid at 00:00 and fail as `DATA` (no proxy blame); any rebuild after rollover skips past dates entirely. Past dates are unsearchable by definition — losing up to a day at the boundary is by design.
 
@@ -104,7 +104,7 @@ Details: [architecture](architecture.md), [design](design.md), [data model](data
 
 Querying: target the silver prefix directly; `origin`/`destination` are real columns, so `hive_partitioning` is not required (still harmless). Ingest via DuckDB `read_parquet('s3://.../**/*.parquet')` / `httpfs`, or `aws s3 sync`.
 
-Totals: 55 runs, 986 files, ~740 MB, ~23.6M rows (v2 re-projection from bronze recovered ~10% null-price rows that v1 backfill had dropped). 17 unique destinations: the 15-route catalog (SIN → KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/PVG/PEK/ICN/PUS) plus HKG, captured once by a backfill run outside the catalog.
+Totals: 55 runs, 986 files, ~740 MB, ~23.6M rows (v2 re-projection from bronze recovered ~10% null-price rows that v1 backfill had dropped). 18 unique destinations: the 16-route catalog (SIN → KUL/CGK/BKK/HKT/DPS/MNL/SGN/HAN/NRT/KIX/HND/TPE/PVG/PEK/ICN/PUS) plus HKG, captured once by a backfill run outside the catalog.
 
 **Backfill.** Historical local JSONL (Jul 11 — Aug 17, 43 files) uploaded to R2 silver + GitHub release `backfill-archive` (43 bronze gz assets). Covering pre-schedule data gap.
 
