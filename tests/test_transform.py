@@ -299,8 +299,8 @@ def test_transform_parquet_compressed_zstd(sample_jsonl: Path, tmp_path: Path) -
 
 def test_transform_iata_case_expr_covers_all_airports() -> None:
     """_iata_case_expr covers all airports in the mapping."""
-    from cli.transform import _iata_case_expr
     from collector.airports import AIRPORT_NAME_TO_IATA
+    from collector.silver import _iata_case_expr
 
     expr_origin = _iata_case_expr("origin")
     expr_dest = _iata_case_expr("destination")

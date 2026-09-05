@@ -11,6 +11,8 @@ from curl_cffi.requests import AsyncSession
 
 from collector.models.proxy import ProxyInfo
 from collector.proxy import cache, sources, validation
+from collector.proxy.blacklist import Blacklist
+from collector.proxy.refresh_state import RefreshState
 from collector.services.progress import ProgressLogger
 
 logger = logging.getLogger(__name__)
@@ -20,8 +22,6 @@ _MAX_429_EVICTIONS = 3
 _MAX_STUB_EVICTIONS = 3
 _REFILL_THRESHOLD = 20
 
-_EMPTY_REFETCH_BACKOFF = (60, 120, 300, 600)
-_AUTO_REFRESH_GAP = 5
 _EVICT_BLACKLIST_TTL = 30 * 60
 _DEAD_BLACKLIST_TTL = 10 * 60
 _REFRESH_AWAIT_TIMEOUT = 60.0
@@ -47,11 +47,8 @@ class ProxyRotator:
         self._weight_pool_len = 0
         self._refresh_task: asyncio.Task[None] | None = None
         self._schedule_lock = asyncio.Lock()
-        self._last_force_refresh = float("-inf")
-        self._last_auto_refresh = float("-inf")
-        self._consecutive_force_refetches = 0
-        self._consecutive_auto_refills = 0
-        self._blacklist: dict[str, float] = {}
+        self._blacklist = Blacklist()
+        self._refresh_state = RefreshState()
         self._real_ip: str = ""
 
     async def _validate(
@@ -307,33 +304,14 @@ class ProxyRotator:
     async def _auto_refresh(self) -> None:
         """Refill an exhausted pool, escalating to a force-refetch on starvation."""
         try:
-            now = time.monotonic()
-            # Bypass the gap when the pool is still starved: a 5-minute cooldown
-            # after each refill left a dead pool (3 proxies) sitting idle for
-            # minutes during retry rounds. Repeated refills are bounded by the
-            # refresh itself + the empty-pool force-refetch backoff below.
-            if now - self._last_auto_refresh < _AUTO_REFRESH_GAP:
-                if self.usable_count() >= _REFILL_THRESHOLD:
-                    return
-                if self._consecutive_auto_refills > 0:
-                    return
-            self._last_auto_refresh = now
+            if not self._refresh_state.should_refill(
+                self.usable_count(), _REFILL_THRESHOLD
+            ):
+                return
             logger.info("Proxy pool exhausted; auto-refreshing")
             await self.refresh(max_per_source=sources.REFILL_MAX_PER_SOURCE)
             usable = self.usable_count()
-            if usable > 0:
-                self._consecutive_force_refetches = 0
-                self._consecutive_auto_refills = 0
-                return
-            self._consecutive_auto_refills += 1
-            index = min(
-                self._consecutive_auto_refills - 1,
-                len(_EMPTY_REFETCH_BACKOFF) - 1,
-            )
-            cooldown = _EMPTY_REFETCH_BACKOFF[index]
-            if now - self._last_force_refresh > cooldown:
-                self._last_force_refresh = now
-                self._consecutive_force_refetches += 1
+            if self._refresh_state.refill_result(usable):
                 logger.warning(
                     "Proxy pool low (%d usable < %d); fetching fresh lists",
                     usable,
@@ -351,7 +329,7 @@ class ProxyRotator:
         """Remove ``proxy`` from the pool (when present) and blacklist its URL."""
         with suppress(ValueError):
             self._proxies.remove(proxy)
-        self._blacklist[proxy.url] = time.monotonic() + blacklist_ttl
+        self._blacklist.park(proxy.url, blacklist_ttl)
 
     async def report_failure(self, proxy: ProxyInfo) -> None:
         """Evict a dead proxy and park its URL for the dead-proxy TTL."""
@@ -411,9 +389,5 @@ class ProxyRotator:
         return sum(1 for p in self._proxies if p.rate_limit_until <= now)
 
     def _active_blacklist(self) -> set[str]:
-        """Return non-expired blacklisted URLs, pruning expired entries."""
-        now = time.monotonic()
-        expired = [u for u, exp in self._blacklist.items() if exp <= now]
-        for u in expired:
-            del self._blacklist[u]
-        return set(self._blacklist)
+        """Return non-expired blacklisted URLs (pruning expired entries)."""
+        return self._blacklist.active()
