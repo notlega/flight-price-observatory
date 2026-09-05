@@ -17,10 +17,10 @@ to run unattended on free infrastructure. Requirements:
 ### Schedule: 4-day cycle anchored to 2026-08-18, run at 05:30 SGT
 
 - `cycle_day = (days_since_epoch - anchor_epoch_day) % 4`, anchor = 2026-08-18.
-- Day 0: full 270-day pass (~20,325 tasks, ~2.5-3.5 h).
-- Day 1: 0-30 days ahead (~2,325 tasks, ~25 min).
-- Day 2: 0-60 days ahead (~4,525 tasks, ~45 min).
-- Day 3: 0-90 days ahead (~6,725 tasks, ~1 h 5 min).
+- Day 0: full 270-day pass (~21,680 tasks, ~2.5-3.5 h).
+- Day 1: 0-30 days ahead (~2,480 tasks, ~25 min).
+- Day 2: 0-60 days ahead (~4,880 tasks, ~45 min).
+- Day 3: 0-90 days ahead (~7,280 tasks, ~1 h 5 min).
 
 Rationale: booking-window research shows near-horizon prices move daily while
 far-horizon prices move slowly. Daily re-collection of the near window plus a
