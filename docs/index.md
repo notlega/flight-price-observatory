@@ -116,8 +116,9 @@ Totals: 55 runs, 986 files, ~740 MB, ~23.6M rows (v2 re-projection from bronze r
 | 2026-08-19 | ✅ | ✅ | Bronze always present; silver backfilled from bronze |
 | 2026-08-26 | — | — | Aug 26 cron never ran |
 | 2026-08-31 | — | — | Aug 31 cron delayed past midnight; cycle day shifted (date guard shipped) |
+| 2026-09-02 | — | — | w90 collected but release-verify step failed early (since fixed); cache save failed before upload |
 
-Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831 have neither bronze nor silver. Bronze release `bronze-20260830` is a draft until the day-3 run publishes it (assets accumulate 0830 → 0901 → 0902).
+Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831/0902 have neither bronze nor silver. Draft releases: `bronze-20260830` holds full (0830) + w60 (0901), but lost w30 (0831) + w90 (0902); `bronze-20260903` holds only w30 from a later manual backfill re-run.
 
 **Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis. Gold layer (aggregated route profiles, buy-advice, spike alerts) — implementation runbook for collaborators: [gold layer](gold_layer.md).
 
