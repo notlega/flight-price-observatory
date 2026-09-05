@@ -28,7 +28,8 @@ exclude = [
     "venv",
     "storage",
     "htmlcov",
-    "stubs"
+    "stubs",
+    "scripts",
 ]
 
 # Same as Black.

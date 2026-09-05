@@ -8,12 +8,14 @@ import pytest
 from curl_cffi.requests import exceptions as curl_exceptions
 
 from collector.models.proxy import ProxyInfo
+from collector.proxy.blacklist import Blacklist
 from collector.proxy.cache import (
     CACHE_FRESH_TTL,
     CACHE_MAX_AGE,
     load_cache,
     save_cache,
 )
+from collector.proxy.refresh_state import RefreshState
 from collector.proxy.rotator import ProxyRotator
 from collector.proxy.sources import (
     build_sources,
@@ -833,7 +835,7 @@ async def test_report_rate_limited_evicts_after_threshold():
         await rot.report_rate_limited(victim, seconds=60)
     assert rot.working_count() == 1
     assert rot._proxies[0].url == "http://b:2"
-    assert rot._blacklist["http://a:1"] > time.monotonic()
+    assert "http://a:1" in rot._blacklist.active()
 
 
 async def test_report_rate_limited_after_eviction_ignored():
@@ -953,7 +955,7 @@ async def test_auto_refresh_skips_refill_when_pool_ok():
 async def test_auto_refresh_cooldown_blocks_refill():
     rot = ProxyRotator()
     await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(15)])
-    rot._last_force_refresh = time.monotonic()
+    rot._refresh_state.last_force_refresh = time.monotonic()
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -968,7 +970,7 @@ async def test_auto_refresh_cooldown_blocks_refill():
 async def test_auto_refresh_gap_skips_repeated_attempts():
     rot = ProxyRotator()
     await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(20)])
-    rot._last_auto_refresh = time.monotonic()
+    rot._refresh_state.last_auto_refresh = time.monotonic()
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -983,7 +985,7 @@ async def test_auto_refresh_gap_skips_repeated_attempts():
 async def test_auto_refresh_gap_bypassed_when_pool_starved():
     rot = ProxyRotator()
     await rot._set_pool([make_proxy(url="http://p1:1")])
-    rot._last_auto_refresh = time.monotonic()
+    rot._refresh_state.last_auto_refresh = time.monotonic()
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1005,8 +1007,8 @@ async def test_auto_refresh_empty_pool_escalates_backoff():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         for _ in range(3):
             await rot._auto_refresh()
-            rot._last_auto_refresh = float("-inf")
-            rot._last_force_refresh = float("-inf")
+            rot._refresh_state.last_auto_refresh = float("-inf")
+            rot._refresh_state.last_force_refresh = float("-inf")
 
     assert calls == [
         {"max_per_source": 750},
@@ -1016,13 +1018,13 @@ async def test_auto_refresh_empty_pool_escalates_backoff():
         {"max_per_source": 750},
         {"force": True, "max_per_source": 750},
     ]
-    assert rot._consecutive_force_refetches == 3
+    assert rot._refresh_state.consecutive_force_refetches == 3
 
 
 async def test_auto_refresh_backoff_cooldown_blocks_escalated_refetch():
     rot = ProxyRotator()
-    rot._last_force_refresh = time.monotonic()
-    rot._consecutive_force_refetches = 3
+    rot._refresh_state.last_force_refresh = time.monotonic()
+    rot._refresh_state.consecutive_force_refetches = 3
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1032,12 +1034,12 @@ async def test_auto_refresh_backoff_cooldown_blocks_escalated_refetch():
         await rot._auto_refresh()
 
     assert calls == [{"max_per_source": 750}]
-    assert rot._consecutive_force_refetches == 3
+    assert rot._refresh_state.consecutive_force_refetches == 3
 
 
 async def test_auto_refresh_resets_backoff_when_pool_recovers():
     rot = ProxyRotator()
-    rot._consecutive_force_refetches = 5
+    rot._refresh_state.consecutive_force_refetches = 5
     await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(25)])
     calls = []
 
@@ -1048,12 +1050,12 @@ async def test_auto_refresh_resets_backoff_when_pool_recovers():
         await rot._auto_refresh()
 
     assert calls == [{"max_per_source": 750}]
-    assert rot._consecutive_force_refetches == 0
+    assert rot._refresh_state.consecutive_force_refetches == 0
 
 
 async def test_auto_refresh_empty_pool_uses_short_cooldown():
     rot = ProxyRotator()
-    rot._last_force_refresh = time.monotonic() - 61
+    rot._refresh_state.last_force_refresh = time.monotonic() - 61
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1070,7 +1072,7 @@ async def test_auto_refresh_empty_pool_uses_short_cooldown():
 async def test_auto_refresh_low_pool_keeps_long_cooldown():
     rot = ProxyRotator()
     await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(5)])
-    rot._last_force_refresh = time.monotonic() - 61
+    rot._refresh_state.last_force_refresh = time.monotonic() - 61
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1084,7 +1086,7 @@ async def test_auto_refresh_low_pool_keeps_long_cooldown():
 
 async def test_auto_refresh_partial_recovery_resets_backoff():
     rot = ProxyRotator()
-    rot._consecutive_force_refetches = 5
+    rot._refresh_state.consecutive_force_refetches = 5
     await rot._set_pool([make_proxy(url=f"http://p{i}:1") for i in range(5)])
     calls = []
 
@@ -1095,13 +1097,13 @@ async def test_auto_refresh_partial_recovery_resets_backoff():
         await rot._auto_refresh()
 
     assert calls == [{"max_per_source": 750}]
-    assert rot._consecutive_force_refetches == 0
+    assert rot._refresh_state.consecutive_force_refetches == 0
 
 
 async def test_auto_refresh_backoff_caps_at_longest_interval():
     rot = ProxyRotator()
-    rot._last_force_refresh = float("-inf")
-    rot._consecutive_force_refetches = 10
+    rot._refresh_state.last_force_refresh = float("-inf")
+    rot._refresh_state.consecutive_force_refetches = 10
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1114,12 +1116,12 @@ async def test_auto_refresh_backoff_caps_at_longest_interval():
         {"max_per_source": 750},
         {"force": True, "max_per_source": 750},
     ]
-    assert rot._consecutive_force_refetches == 11
+    assert rot._refresh_state.consecutive_force_refetches == 11
 
 
 async def test_auto_refresh_refresh_error_keeps_state():
     rot = ProxyRotator()
-    rot._consecutive_force_refetches = 2
+    rot._refresh_state.consecutive_force_refetches = 2
 
     async def boom(**kwargs):
         raise RuntimeError("fetch failed")
@@ -1127,14 +1129,14 @@ async def test_auto_refresh_refresh_error_keeps_state():
     with patch.object(rot, "refresh", side_effect=boom):
         await rot._auto_refresh()
 
-    assert rot._consecutive_force_refetches == 2
+    assert rot._refresh_state.consecutive_force_refetches == 2
     assert rot._refresh_task is None
 
 
 async def test_auto_refresh_starved_pool_respects_refresh_gap():
     rot = ProxyRotator()
-    rot._last_auto_refresh = time.monotonic()
-    rot._consecutive_auto_refills = 1
+    rot._refresh_state.last_auto_refresh = time.monotonic()
+    rot._refresh_state.consecutive_auto_refills = 1
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1156,11 +1158,11 @@ async def test_auto_refresh_starved_pool_escalates_on_repeated_refills():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         for _ in range(3):
             await rot._auto_refresh()
-            rot._last_auto_refresh = float("-inf")
-            rot._last_force_refresh = float("-inf")
+            rot._refresh_state.last_auto_refresh = float("-inf")
+            rot._refresh_state.last_force_refresh = float("-inf")
 
-    assert rot._consecutive_auto_refills == 3
-    assert rot._consecutive_force_refetches == 3
+    assert rot._refresh_state.consecutive_auto_refills == 3
+    assert rot._refresh_state.consecutive_force_refetches == 3
 
 
 async def test_auto_refresh_parked_pool_then_revive_resets_backoff():
@@ -1175,12 +1177,12 @@ async def test_auto_refresh_parked_pool_then_revive_resets_backoff():
 
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
-        rot._last_auto_refresh = float("-inf")
-        rot._last_force_refresh = float("-inf")
+        rot._refresh_state.last_auto_refresh = float("-inf")
+        rot._refresh_state.last_force_refresh = float("-inf")
         parked.rate_limit_until = 0.0
         await rot._auto_refresh()
 
-    assert rot._consecutive_force_refetches == 0
+    assert rot._refresh_state.consecutive_force_refetches == 0
     assert any(c.get("force") for c in calls)
 
 
@@ -1228,7 +1230,7 @@ async def test_auto_refresh_all_parked_uses_short_cooldown():
     parked = make_proxy(url="http://p:1")
     parked.rate_limit_until = time.monotonic() + 60
     await rot._set_pool([parked])
-    rot._last_force_refresh = time.monotonic() - 61
+    rot._refresh_state.last_force_refresh = time.monotonic() - 61
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1265,7 +1267,7 @@ async def test_auto_refresh_gap_resets_after_elapsed():
     with patch.object(rot, "refresh", side_effect=fake_refresh):
         await rot._auto_refresh()
         first = len(calls)
-        rot._last_auto_refresh = time.monotonic() - 10
+        rot._refresh_state.last_auto_refresh = time.monotonic() - 10
         await rot._auto_refresh()
         second = len(calls)
     assert second == first + 1
@@ -1287,7 +1289,7 @@ async def test_auto_refresh_at_threshold_no_force():
 
 async def test_get_proxy_storm_throttled():
     rot = ProxyRotator()
-    rot._last_force_refresh = time.monotonic()
+    rot._refresh_state.last_force_refresh = time.monotonic()
     calls = []
 
     async def fake_refresh(**kwargs):
@@ -1314,7 +1316,7 @@ async def test_get_proxy_retries_after_refresh_failure():
 
     with patch.object(rot, "refresh", side_effect=flaky):
         first = await rot.get_proxy()
-        rot._last_auto_refresh = time.monotonic() - 10
+        rot._refresh_state.last_auto_refresh = time.monotonic() - 10
         second = await rot.get_proxy()
 
     assert first is None
@@ -1328,7 +1330,7 @@ async def test_report_failure_already_removed_no_crash():
     await rot._set_pool([proxy])
     rot._proxies.clear()
     await rot.report_failure(proxy)
-    assert proxy.url in rot._blacklist
+    assert proxy.url in rot._blacklist.active()
 
 
 async def test_refresh_uses_fresh_cache():
@@ -1349,7 +1351,7 @@ async def test_refresh_uses_fresh_cache():
 
 async def test_evicted_proxy_excluded_from_cache_fresh():
     rot = ProxyRotator()
-    rot._blacklist["http://bad:1"] = time.monotonic() + 600
+    rot._blacklist.park("http://bad:1", 600)
     cached = [make_proxy(url="http://bad:1"), make_proxy(url="http://good:2")]
     with (
         patch("collector.proxy.cache.MIN_CACHE_POOL", 0),
@@ -1366,7 +1368,7 @@ async def test_evicted_proxy_excluded_from_cache_fresh():
 
 async def test_blacklisted_proxy_excluded_from_force_refresh():
     rot = ProxyRotator()
-    rot._blacklist["http://bad:1"] = time.monotonic() + 600
+    rot._blacklist.park("http://bad:1", 600)
     fresh = [make_proxy(url="http://bad:1"), make_proxy(url="http://good:2")]
     with (
         patch("collector.proxy.sources.parse_all_sources", return_value=fresh),
@@ -1402,7 +1404,7 @@ async def test_dead_proxy_excluded_from_cache_fresh():
 
 async def test_blacklist_expiry_readmits_proxy():
     rot = ProxyRotator()
-    rot._blacklist["http://bad:1"] = time.monotonic() - 1
+    rot._blacklist.park("http://bad:1", -1)
     cached = [make_proxy(url="http://bad:1")]
     with (
         patch("collector.proxy.cache.MIN_CACHE_POOL", 0),
@@ -1414,7 +1416,7 @@ async def test_blacklist_expiry_readmits_proxy():
     ):
         await rot.refresh(force=False)
     assert [p.url for p in rot._proxies] == ["http://bad:1"]
-    assert rot._blacklist == {}
+    assert rot._blacklist.active() == set()
     fetch.assert_not_called()
 
 
@@ -1584,7 +1586,7 @@ async def test_report_stub_below_threshold_keeps_proxy():
     await rot.report_stub(proxy)
     assert proxy.stub_count == 1
     assert rot.working_count() == 1
-    assert proxy.url not in rot._blacklist
+    assert proxy.url not in rot._blacklist.active()
 
 
 async def test_report_stub_evicts_at_threshold():
@@ -1594,7 +1596,7 @@ async def test_report_stub_evicts_at_threshold():
     for _ in range(3):
         await rot.report_stub(proxy)
     assert rot.working_count() == 0
-    assert proxy.url in rot._blacklist
+    assert proxy.url in rot._blacklist.active()
 
 
 async def test_report_stub_count_roundtrips_cache(tmp_path):
@@ -1608,7 +1610,45 @@ async def test_report_stub_count_roundtrips_cache(tmp_path):
 
 
 def test_last_force_refresh_init_allows_immediate_refill():
-    assert ProxyRotator()._last_force_refresh == float("-inf")
+    assert ProxyRotator()._refresh_state.last_force_refresh == float("-inf")
+
+
+def test_blacklist_tracks_and_prunes_expired_entries():
+    bl = Blacklist()
+    assert bl.active() == set()
+    bl.park("http://a:1", 600)
+    assert bl.active() == {"http://a:1"}
+    bl.park("http://b:2", -1)
+    assert bl.active() == {"http://a:1"}
+    assert bl.active() == {"http://a:1"}
+
+
+def test_refresh_state_gap_blocks_refill_on_healthy_pool():
+    state = RefreshState()
+    state.last_auto_refresh = time.monotonic()
+    assert not state.should_refill(usable=20, refill_threshold=20)
+
+
+def test_refresh_state_starved_pool_bypasses_gap():
+    state = RefreshState()
+    state.last_auto_refresh = time.monotonic()
+    assert state.should_refill(usable=1, refill_threshold=20)
+
+
+def test_refresh_state_recovery_resets_counters():
+    state = RefreshState()
+    state.consecutive_auto_refills = 3
+    state.consecutive_force_refetches = 5
+    assert not state.refill_result(usable=1)
+    assert state.consecutive_auto_refills == 0
+    assert state.consecutive_force_refetches == 0
+
+
+def test_refresh_state_force_refetch_due_on_empty_pool():
+    state = RefreshState()
+    assert state.refill_result(usable=0)
+    assert state.consecutive_auto_refills == 1
+    assert state.consecutive_force_refetches == 1
 
 
 async def test_refresh_force_skips_cache():

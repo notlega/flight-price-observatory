@@ -54,6 +54,6 @@ pythonVersion = "3.14"
 typeCheckingMode = "strict"
 useLibraryCodeForTypes = true
 include = ["."]
-exclude = ["htmlcov", "storage", ".venv", "tests", "stubs"]
+exclude = ["htmlcov", "storage", ".venv", "tests", "stubs", "scripts"]
 stubPath = "stubs"
 
