@@ -11,6 +11,13 @@ on:
           current cycle (search/convert/release steps are re-run).
         type: boolean
         default: false
+      backfill_date:
+        description: >-
+          YYYY-MM-DD target day to backfill: computes cycle day/window/tag
+          for that date, restores that day's cached search state (with
+          continue=true) and re-attempts its release.
+        type: string
+        default: ""
 
 concurrency:
   group: collect
@@ -42,9 +49,12 @@ jobs:
           anchor = date.fromisoformat("${{ env.ANCHOR_DATE }}")
           now = datetime.now(timezone.utc)
           today = now.date()
+          backfill_date = "${{ inputs.backfill_date }}"
+          if backfill_date:
+              today = date.fromisoformat(backfill_date)
           # If schedule delayed past midnight (common for late-running workflows),
           # use yesterday to stay aligned with the intended scheduled day.
-          if "${{ github.event_name }}" == "schedule" and now.hour < 6:
+          elif "${{ github.event_name }}" == "schedule" and now.hour < 6:
               today -= timedelta(days=1)
           offset = (today - anchor).days
           cycle_day = offset % 4
@@ -86,7 +96,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: storage/db/search_state.db
-          key: ${{ env.CYCLE_TAG }}-search-state
+          key: ${{ env.CYCLE_TAG }}-search-state-${{ env.RUN_TS }}
+          restore-keys: ${{ env.CYCLE_TAG }}-search-state-
 
       - name: Start fresh state on regular runs
         if: steps.resume.outputs.continue != 'true'
@@ -105,7 +116,7 @@ jobs:
         if: always() && hashFiles('storage/db/search_state.db') != ''
         with:
           path: storage/db/search_state.db
-          key: ${{ env.CYCLE_TAG }}-search-state
+          key: ${{ env.CYCLE_TAG }}-search-state-${{ env.RUN_TS }}
 
       - name: Ensure storage/raw exists
         run: mkdir -p storage/raw
@@ -128,12 +139,17 @@ jobs:
         with:
           tag_name: ${{ env.CYCLE_TAG }}
           name: bronze-${{ env.CYCLE_DATE }}
-          draft: ${{ env.CYCLE_DAY != '3' }}
+          draft: true
           make_latest: false
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload raw bundle to cycle release
-        run: gh release upload "$CYCLE_TAG" "storage/raw/$ASSET" --clobber
+        run: |
+          if gh release view "$CYCLE_TAG" --json assets --jq '.assets[].name' | grep -qxF "$ASSET"; then
+            echo "asset already present: $ASSET"
+          else
+            gh release upload "$CYCLE_TAG" "storage/raw/$ASSET" --clobber
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

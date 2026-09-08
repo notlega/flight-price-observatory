@@ -117,8 +117,10 @@ Totals: 55 runs, 986 files, ~740 MB, ~23.6M rows (v2 re-projection from bronze r
 | 2026-08-26 | — | — | Aug 26 cron never ran |
 | 2026-08-31 | — | — | Aug 31 cron delayed past midnight; cycle day shifted (date guard shipped) |
 | 2026-09-02 | — | — | w90 collected but release-verify step failed early (since fixed); cache save failed before upload |
+| 2026-09-03 | — | — | day0 (full) run failed; departure dates re-covered by cycle-20260907 |
+| 2026-09-06 | — | — | day3 w90 upload hit immutable-release 422 (create-step published prematurely; fixed by draft-always + per-day cache key) — recoverable dates re-covered by cycle-20260907 |
 
-Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831/0902 have neither bronze nor silver. Draft releases: `bronze-20260830` holds full (0830) + w60 (0901), but lost w30 (0831) + w90 (0902); `bronze-20260903` holds only w30 from a later manual backfill re-run.
+Missing days are permanent where noted: past booking-window dates are unsearchable, so a failed/lost run cannot be re-collected. 0818/0826/0831/0902 have neither bronze nor silver. Draft releases: `bronze-20260830` holds full (0830) + w60 (0901), but lost w30 (0831) + w90 (0902); `bronze-20260903` holds w30 (0904) + w60 (0905), but lost day0 full (0903) + w90 (0906) — re-covered by cycle-20260907.
 
 **Analytics.** DuckDB SQL queries against Parquet. Route comparisons, seasonal trends, booking window analysis. Gold layer (aggregated route profiles, buy-advice, spike alerts) — implementation runbook for collaborators: [gold layer](gold_layer.md).
 
